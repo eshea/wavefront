@@ -93,8 +93,10 @@ while true; do
     > "$log_file" 2> "$txt_file" &
   claude_pid=$!
 
-  # Watch for timeout in a subshell that signals the main proc
-  ( sleep 360; kill -TERM "$claude_pid" 2>/dev/null ) &
+  # Watch for timeout in a subshell that signals the main proc.
+  # 600s = 10 min — generous enough that build+test+document fits without
+  # the iter getting SIGTERM'd mid-write.
+  ( sleep 600; kill -TERM "$claude_pid" 2>/dev/null ) &
   watcher_pid=$!
 
   wait "$claude_pid"
@@ -120,6 +122,10 @@ while true; do
 
   printf '[ralph] iter %s done · in=%s out=%s cache_read=%s · cum_in=%s cum_out=%s\n' \
     "$iter_pad" "$in_tok" "$out_tok" "$cache_read" "$total_in" "$total_out"
+
+  # Auto-score the tick's output (pixel metrics + visual judge).
+  # Best effort — failures don't stop the loop.
+  ./loop/score_tick.sh "$ITER" 2>/dev/null || true
 
   ITER=$((ITER + 1))
   printf '%s' "$ITER" > "$ITER_FILE"

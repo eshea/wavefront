@@ -17,12 +17,47 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference outputs (post) | Known settings |
 |---|---|---|
-| `examples/contour_space_pre.jpg` | `examples/contour_space_post.webp` | unknown — infer |
 | `examples/contour_woman.webp` | `examples/contour_woman_post1.jpeg`, `post2.jpeg`, `post3.jpeg`, `post4.webp`, `post5.webp` | seed=(227,225), CONTOURS=111, LINE SMOOTH=0.00 (from `contour_woman_settings.webp`) |
 
-The woman pair is the **canonical test** because we know the artist's
-exact CORE settings. Use it unless you have a specific reason to use the
-helmet pair.
+The woman pair is the **canonical test**. Use it. The exact settings
+above are baked into `loop/score_tick.sh`.
+
+**HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
+`loop/holdout/contour_space_post.webp` are the held-out test set. Do
+not read from `loop/holdout/`. Do not score against it. Do not use it
+for any inspiration. The harness will run it separately when humans
+want to check for overfitting.
+
+## QUANTITATIVE SIGNAL (read before deciding)
+
+After each tick, `loop/score_tick.sh` runs automatically and appends
+one JSON line to `loop/metrics.jsonl` with three numbers per output:
+
+- `judge_score` (0–100, **primary metric**) — visual judgment from a
+  local Qwen3 122B vision model. This is well-aligned with human
+  judgment. Higher = better.
+- `ssim` (0–1, secondary) — pixel-level structural similarity. Misleading
+  on its own (rewards whitespace match), useful only as a co-signal.
+- `edge_iou` (0–1, secondary) — Canny edge agreement. Same caveat.
+- `path_fit` (0–1) — closeness to reference path count (452). Sanity.
+
+**Before deciding what to try this tick**, run:
+```
+tail -10 loop/metrics.jsonl | jq -c '{iter, judge_score, ssim, edge_iou, path_fit}'
+```
+to see the recent trajectory. If judge_score has been flat or dropping
+across the last 3-5 ticks, your recent hypotheses aren't working — try
+something qualitatively different (revert to an earlier sweet-spot
+config? change a different parameter?).
+
+**Iter 014 was the human-judged best (score 95).** Iter 001 also 92.
+Later iters regressed (loop over-blurred). Your job: get back above 95
+on judge_score, ideally hitting 100. Don't trust your own visual
+judgment over the metric — if your change drops judge_score below the
+last 3 iters' average, `git checkout --` it before exiting.
+
+**Include the latest score line in your log entry.** Use `tail -1
+loop/metrics.jsonl` after `score_tick.sh` runs.
 
 ---
 
@@ -128,25 +163,44 @@ contribution to top 90th percentile"}
 - reference: `examples/contour_woman_post1.jpeg`
 - visual comparison: {what you saw — be specific}
 
+**Score:** judge=NN ssim=0.0NNN edge_iou=0.NNNN path_fit=0.NN
+            · vs last 3 avg: judge ΔNN
+
 **Result:** better / same / worse · vs. reference: {closer / further /
-neutral}
+neutral}  · vs. iter_014 (anchor 95): {N points away}
 
 **Next:** {hypothesis for next tick, or "review" if unclear}
 ```
 
 ---
 
-## RULES
+## RULES (read carefully — violations waste the budget)
 
-1. **Don't ask questions.** This is autonomous. Make a call and move on.
-2. **One change per tick.** Three small wins beat one giant unfinished rewrite.
-3. **If app is broken, fixing it IS the tick.** Document and exit.
-4. **If you ran a worse change, revert it** with `git checkout -- path`
-   before exiting. Don't leave the codebase regressed.
-5. **Stay in CORE territory** for now — don't add STUDIO features unless
+1. **EXACTLY ONE cycle per invocation, then exit.** After you append ONE
+   log entry to `loop/EXPERIMENT_LOG.md`, you are done. Do NOT start
+   another build/test cycle. Do NOT "while I'm here, also try…". The
+   shell will re-invoke you. Stopping now is the right call.
+
+2. **EVERY invocation MUST end with one log entry** — even if you only
+   reviewed, or your build failed, or you reverted. No silent ticks.
+   Past runs had "undocumented iter 014–023" gaps because cycles ran
+   without appending. Don't do that.
+
+3. **Don't ask questions.** This is autonomous. Make a call and move on.
+
+4. **If app is broken, fixing it IS the tick.** Log the fix and exit.
+
+5. **If your change regressed quality, revert it** with
+   `git checkout -- <path>` before exiting (the repo has commits now —
+   checkout actually works). Log the attempt and the revert.
+
+6. **Stay in CORE territory** for now — don't add STUDIO features unless
    the log explicitly schedules them.
-6. **Never delete `examples/` or `loop/EXPERIMENT_LOG.md`.**
-7. If the experiment log says "loop done", create a file `loop/STOP` and
+
+7. **Never delete `examples/` or `loop/EXPERIMENT_LOG.md`.**
+
+8. If the experiment log says "loop done", create a file `loop/STOP` and
    exit. The wrapper will halt.
 
-You have Bash, Read, Edit, Write. Use them. Don't use sub-agents.
+You have Bash, Read, Edit, Write. Use them. Don't use sub-agents. Don't
+start the Flask app if `curl http://localhost:5055/` already returns 200.

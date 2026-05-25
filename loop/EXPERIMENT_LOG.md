@@ -297,6 +297,26 @@ Test whether path count drops from 37k → ~1k and visual quality improves towar
 
 ---
 
+## Iter 026 · 2026-05-25 · Background lum_mix 0.70→0.30; discover resolution mismatch
+
+**Hypothesis:** Dropping background effective_lum_mix from 0.70 to 0.30 will add enough lum-driven variation to break pure-L1 diagonal uniformity while staying below the closed-loop threshold (~0.60 produced organic closed loops).
+
+**Change:** `engine/field.py:101` — changed `dist_weight * 0.70` to `dist_weight * 0.30`. (Note: actual committed baseline was 0.70, not 0.60 as iter_025 logged — prior log entries described code state inaccurately. Also: working tree has undocumented `field = gaussian_filter(field, sigma=1.0)` added after the dist+lum sum; kept as-is.)
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_026.svg` (paths=207, pts=99,960, t_min=132.0, t_max=859.4)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Face has clear concentric diamond rings wrapping around eyes, nose, mouth — diamond geometry recognizable in forehead. Background shows structured diagonal L1 hatching (~6-8px spacing), filling entire image uniformly. Less organic than 0.70, but still no large white areas in corners.
+  - **Reference**: Crisp flat-sided diamond chevrons in forehead center, tight face rings, sparse background with large white areas and wide-spaced flowing bands.
+  - **Key discovery**: Source image is 742×742 but we process at MAX_DIM=640. Artist seed (227,225) is in 742px space; we use it in 640px space (proportionally shifted ~5%). More critically: at 640px, field range ≈ 727 units → 6.6px/level in background. At native 742px, field range would ≈ 1132 units → 10.3px/level (with power=2.7 non-uniform: ~17px in background). This resolution mismatch is likely the primary driver of the dense background hatching.
+
+**Result:** marginal improvement vs committed baseline (207 vs 222 paths). vs. reference: moderate gap unchanged — background density still wrong, but face quality reasonable.
+
+**Next:** build — raise MAX_DIM from 640 to 742 to process the canonical source at native resolution. Hypothesis: larger field range increases background level spacing from ~11px to ~17px, reducing background line density significantly. Also fixes seed coordinate proportional mismatch.
+
+---
+
 ## Iter 026 · 2026-05-25 · Background lum_mix 0.15→0.30 (middle ground)
 
 **Hypothesis:** background effective_lum_mix=0.15 produces pure-L1 uniform diagonal hatching because it's nearly radial. Increasing to 0.30 should add enough organic luminance variation to break the pure-L1 uniformity and create flowing variety.
@@ -426,3 +446,146 @@ power=2.0 was implemented in contour.py per iter_032 "next". lum_light sigma was
 **Result:** significantly better vs. iter_035. vs. reference: closer — background topology now correct (organic wavy), main gap is density.
 
 **Next:** build — increase power from 2.0 to 2.5 in `engine/contour.py:compute_thresholds`. power=2.5 concentrates ~73 levels in face (vs ~66 at p=2.0) and leaves only ~38 levels in background (vs ~46). Background spacing should increase from ~8px to ~12-15px. No other changes.
+
+---
+
+## Iter 037 · 2026-05-25 · power=2.0 → 2.5 in compute_thresholds
+
+**Hypothesis:** power=2.5 concentrates more iso-levels in the face (t near t_min) and reduces background level count, yielding sparser background bands and a more prominent outer diamond ring.
+
+**Change:** `engine/contour.py:31` — changed `f ** 2.0` to `f ** 2.5` in `compute_thresholds`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_037.svg` (paths=192, pts=102,175, t_min=131.3, t_max=905.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Background has flowing organic wavy lines at ~8-12px spacing — slightly sparser than iter_036. Face shows clear diamond ring geometry around forehead and nose. Concentric wrapping around eye sockets is well-defined. Total paths dropped from 203 → 192 and points from 111k → 102k (fewer/shorter lines = sparser).
+  - **Reference**: Background lines ~20-30px apart with large white regions, very prominent outer diamond ring framing the entire face, dense face contours with crisp feature definition.
+  - **Remaining gap**: Background still ~2x too dense. The outer forehead diamond ring visible in our output but far less prominent than reference's large enclosing diamond. Mid-range (t≈200-500) still moderately dense.
+
+**Result:** slightly better vs. iter_036 (fewer paths/points, marginally sparser background). vs. reference: still considerably denser background.
+
+**Next:** build — increase power from 2.5 to 3.0 in `engine/contour.py:31`. At p=3.0, ~77% of levels land in the face region (t < 350) vs ~73% at p=2.5. Background gets ~26 levels (vs ~38 at p=2.5) → estimated spacing ~16-18px, closing in on reference's ~20-30px.
+
+---
+
+## Iter 038 · 2026-05-25 · power=2.5 → 3.0 in compute_thresholds
+
+**Hypothesis:** power=3.0 concentrates ~83% of 111 levels in the face region (t < field_midpoint) and leaves only ~26 levels in the background, increasing estimated background band spacing from ~12px to ~18-20px to match reference's sparse flowing bands.
+
+**Change:** `engine/contour.py:31` — changed `f ** 2.5` to `f ** 3.0`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_021.svg` (paths=184, pts=93,841, t_min=131.3, t_max=905.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: MAJOR improvement in background sparsity. All four corners and edges now show large white areas with sparse widely-spaced flowing lines (~20-30px apart) — very close to reference background topology. Face region is dense with concentric ring structure. The face appears as a darker center mass with rings visible but packed close. Overall balance: background ~90% match to reference, face still too dense (individual rings not as visible as reference).
+  - **Reference**: Very sparse background, crisp facial rings with features clearly visible (eye sockets, nose bridge), prominent outer diamond ring framing face.
+  - **Comparison vs iter_037** (power=2.5): Background clearly improved — iter_037 had ~8-12px spacing, iter_038 has ~20-30px spacing matching reference. Face: comparable ring density but iter_038 face may be slightly over-dense (too many levels crammed in).
+
+**Result:** better vs. iter_037 — background now matches reference sparsity. vs. reference: closer overall; main remaining gap is face density/feature clarity.
+
+**Next:** build — try power=2.7 (middle ground between 2.5 and 3.0). At p=3.0, ~83% of levels land in face → face over-crowded. At p=2.7, ~78% → slightly fewer face levels, rings more individually visible. Background should remain sparse enough (~28-30 levels vs ~26 at p=3.0, spacing ~18-22px still matching reference).
+
+---
+
+## Iter 039 · 2026-05-25 · power=3.0 → 2.7 in compute_thresholds (output: iter_022)
+
+**Hypothesis:** power=2.7 (between 2.5 and 3.0) reduces face over-crowding while keeping background sparse, improving individual ring visibility in face region.
+
+**Change:** `engine/contour.py:31` — changed `f ** 3.0` to `f ** 2.7`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_022.svg` (paths=191, pts=98,848, t_min=131.3, t_max=905.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Background sparse with organic wavy flowing lines in all corners — good match to reference topology. Face region is dense with concentric ring structure but still appears as a dark mass; individual rings within face region are tightly packed. Outer diamond ring (face-background boundary) visible around forehead but not as large or prominently isolated as reference.
+  - **Reference**: Very sparse background, extremely crisp large outer diamond ring clearly framing the entire face, individual face rings cleanly separated with white space between them.
+  - **vs iter_021 (power=3.0)**: Marginally denser (+7 paths, +5k pts). Background quality nearly identical. Face rings barely more separated — difference from 3.0 is minimal.
+
+**Result:** same / marginal improvement vs. iter_038. vs. reference: still considerably over-dense in face, outer diamond ring not as prominent.
+
+**Next:** build — try power=3.5 in `engine/contour.py:31`. Higher power concentrates even more levels near t_min (face), leaving very few background levels → even sparser background. Hypothesis: extreme background sparsity isolates the outer diamond contour more clearly and makes it "pop" from the background as in reference.
+
+---
+
+## Iter 040 · 2026-05-25 · power=2.7 → 3.5 tried, face regressed, REVERTED
+
+**Hypothesis:** power=3.5 would concentrate even more levels near t_min (face), leaving very few background levels → even sparser background with isolated outer diamond contour more prominent.
+
+**Change:** `engine/contour.py:31` — changed `f ** 2.7` to `f ** 3.5` (then REVERTED back to `f ** 2.7`).
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_023.svg` (paths=176, pts=86,303, t_min=131.3, t_max=905.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output (power=3.5)**: Background: excellent — very sparse widely-spaced flowing organic lines in all corners, nearly matching reference spacing. Face: severely regressed — the face appears as a nearly solid dark mass with only faint ring hints visible. Individual ring structure is almost completely lost. The issue: ~90% of 111 levels crammed into face field range, contours pack so tightly they merge optically into gray/black.
+  - **Reference**: Sparse background (matching our background), crisp individually-visible diamond rings throughout face with clear white separation between each ring.
+  - **Key insight**: Power-law threshold adjustment alone cannot solve the face ring visibility problem. The face field gradient is too steep — whether we use power=2.7 or 3.5, the face rings stack too densely. The root cause is in the field itself, not the threshold distribution.
+
+**Result:** worse vs. iter_039 (power=2.7) for face quality — reverted. Background was best yet, face was worst yet.
+
+**Next:** build — smooth the field itself before contour extraction. Apply `scipy.ndimage.gaussian_filter(field, sigma=1.0)` in `engine/field.py` after field construction. This reduces gradient spikes in the face region without destroying face topology, spreading contours more evenly so individual rings become visible with white separation. Power stays at 2.7. This is a fundamentally different lever than threshold distribution.
+
+---
+
+## Iter 041 · 2026-05-25 · Field smoothing σ=1.0 after construction
+
+**Hypothesis:** Field σ=1.0 smoothing would flatten gradient spikes in the face region, spreading iso-contour spacing so individual rings become more visually separated with white between them.
+
+**Change:** `engine/field.py:107` — added `field = gaussian_filter(field, sigma=1.0)` after `field = dist_field + lum_field`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_024.svg` (paths=191, pts=98,964, t_min=132.0, t_max=905.0)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Background excellent — 4 corner regions show sparse widely-spaced flowing organic lines matching reference background topology. Face center still appears as a dark mass with faintly visible concentric rings. Diamond geometry present around nose/forehead but rings too densely packed to be individually visible. Overall topology correct, rendering contrast wrong.
+  - **Reference**: Sparse background (matching ours), crisp individually-visible diamond rings with clear white separation between each ring, eye sockets/nose/chin sharply defined.
+  - **Key finding**: σ=1.0 had negligible effect — stats virtually identical to iter_039 (191/98,964 vs 191/98,848). The field built from adaptive-blurred luminance is already smooth; σ=1.0 doesn't meaningfully change gradient steepness. Face ring density problem persists.
+  - **New hypothesis**: The face rings may be *physically present and correctly spaced* but *visually merged* because base stroke width=1.4px at wt_range=0.0 is too thick relative to ring spacing (~4-5px). The reference appears to use thinner strokes (~0.5-0.8px pen plotter width). Reducing stroke width from 1.4 → 0.7 should reveal white space between rings without changing field or contour logic.
+
+**Result:** same as iter_040 — negligible change. vs. reference: face rings still merge into dark mass.
+
+**Next:** build — reduce base stroke width in `engine/export.py:25` from `1.4` to `0.7` (halving stroke width at wt_range=0.0). Hypothesis: face rings are spaced correctly but visually obscured by thick strokes; thinner strokes will reveal individual rings and white space between them, matching reference aesthetics.
+
+---
+
+## Iter 042 · 2026-05-25 14:30 · Stroke width 1.4→0.7 tried, REVERTED — made face worse
+
+**Hypothesis:** Halving base stroke width from 1.4px to 0.7px would reveal white space between tightly-packed face rings that were visually merged by thick strokes.
+
+**Change:** `engine/export.py:25` — changed `max(0.2, 1.4 - normalized_t * wt_range * 1.2)` to `max(0.2, 0.7 - normalized_t * wt_range * 0.5)` — then **REVERTED** back to 1.4.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_025.svg` (paths=191, pts=98,964, t_min=132.0, t_max=905.0) — same stats as iter_024 (stroke change is SVG-only)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output (0.7px strokes)**: Background excellent — very sparse organic wavy bands in all four corners with good white space, closely matching reference topology. Face center: WORSE than 1.4px — thin 0.7px strokes on tightly packed rings (~4-5px spacing) produce a smooth gray gradient wash rather than visible distinct rings. The face reads as a featureless gray smear. Diamond geometry at the nose/forehead boundary faintly visible but washed out.
+  - **Reference**: Crisp, wide, clearly-separated diamond rings with strong black strokes and visible white between each ring.
+  - **Key finding**: The face rings are NOT correctly spaced — they are genuinely too close together. Halving stroke width reveals this: with 0.7px strokes on rings that are ~2-4px apart in the inner face zone, you still get gray wash, just lighter. The problem is **physical ring density**, not stroke width.
+  - **Root cause**: power=2.7 concentrates ~77% of 111 iso-levels into the face zone field range. Inner rings near seed are ~2-3px apart in physical space — too close to see even with thin strokes. Reference's rings are ~8-12px apart.
+
+**Result:** worse vs. iter_041 — face more washed out. REVERTED. vs. reference: no improvement.
+
+**Next:** build — reduce face lum_mix from 1.0 to 0.5 by applying a spatial weighting in the face zone of `engine/field.py`. With lower face lum contribution, the face field gradient flattens → inner rings spread farther apart physically → individual rings become visible with white space between them. Background lum_mix=1.0 stays unchanged. Hypothesis: face ring spacing ≈ doubles, matching reference's widely-separated rings.
+
+---
+
+## Iter 043 · 2026-05-25 · Face zone lum_mix factor 1.0 → 0.5 (spatial weighting)
+
+**Hypothesis:** Reducing the face-zone lum_mix factor from 1.0 → 0.5 (in `effective_lum_mix` computation) flattens the face field gradient, spreading iso-contour rings farther apart physically so individual rings become visible with white space between them. Background factor (0.30) remains unchanged.
+
+**Change:** `engine/field.py:101` — changed `(1.0 - dist_weight) * 1.0` to `(1.0 - dist_weight) * 0.5` in `effective_lum_mix` formula.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_038.svg` (paths=178, pts=97,006, t_min=99.0, t_max=859.4)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output (face_factor=0.5)**: MAJOR IMPROVEMENT — face now shows clearly visible individually-separated diamond rings with white space between them. No longer a dark mass. Concentric diamond geometry correct: large outer ring frames the face, eye sockets, nose, chin all deflect rings with recognizable topology. Center of face (innermost rings) still somewhat dense but individual rings discernible. Background: sparse organic parallel bands in 4 quadrants, slightly more complex than reference but close.
+  - **Reference**: Very sparse background, face rings with ~8-12px white space between each ring, large outer diamond prominently framing face, all facial features cleanly separated. Individual rings visible throughout entire face with no dark-mass zones.
+  - **vs iter_025 (power=2.7, face_factor=1.0)**: Substantially better — t_min dropped 132→99, paths 191→178. Face structure now clearly visible where it was a dark mass before. White space between rings real and significant.
+  - **Remaining gap**: Center of face rings slightly more dense than reference (~4px vs ~8px spacing near center). Background slightly more undulating than reference's straighter parallel bands.
+
+**Result:** better — clear improvement vs. all prior iterations. vs. reference: closest match yet on face ring visibility; small gap remains on inner ring spacing.
+
+**Next:** build — try face_factor 0.5 → 0.35 to further reduce inner-face gradient steepness and widen ring spacing near seed. Power stays at 2.7. Hypothesis: inner rings will spread to ~6-8px spacing, matching reference's well-separated inner rings.
