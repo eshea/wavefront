@@ -1,0 +1,110 @@
+/*
+ * WAVEFRONT — supplemental styles.
+ * Main UI styles are inline in templates/index.html to keep the app
+ * single-file portable. This sheet adds enhancements for interactions
+ * and print output.
+ */
+
+/* Drop zone active state (also set via .active class for dragover events) */
+.drop.dragover,
+.drop.active {
+  border-color: #00ff88 !important;
+  background: #0f1a14 !important;
+  color: #00ff88 !important;
+}
+
+/* Slider track + thumb refinement */
+input[type=range] {
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  box-shadow: 0 0 0 0 rgba(200, 168, 0, 0.35);
+  transition: box-shadow 0.18s ease, transform 0.12s ease;
+}
+input[type=range]:hover::-webkit-slider-thumb,
+input[type=range]:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(200, 168, 0, 0.18);
+}
+input[type=range]:active::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+input[type=range]::-moz-range-thumb {
+  box-shadow: 0 0 0 0 rgba(200, 168, 0, 0.35);
+  transition: box-shadow 0.18s ease;
+}
+input[type=range]:hover::-moz-range-thumb,
+input[type=range]:focus::-moz-range-thumb {
+  box-shadow: 0 0 0 4px rgba(200, 168, 0, 0.18);
+}
+
+/* Slim, dark scrollbar for the panel */
+.panel {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2a #0d0d0d;
+}
+.panel::-webkit-scrollbar {
+  width: 6px;
+}
+.panel::-webkit-scrollbar-track {
+  background: #0d0d0d;
+}
+.panel::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 3px;
+}
+.panel::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
+}
+
+/* Compute button loading state */
+@keyframes wf-spin {
+  to { transform: rotate(360deg); }
+}
+.btn.primary:disabled {
+  position: relative;
+  color: rgba(255, 255, 255, 0.7);
+}
+.btn.primary:disabled::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: wf-spin 0.7s linear infinite;
+}
+
+/* Stat card value transition (subtle highlight when values update) */
+.stat .v {
+  transition: color 0.25s ease;
+}
+
+/* Print: canvas only */
+@media print {
+  body, html {
+    background: #fff !important;
+    color: #000 !important;
+    overflow: visible !important;
+  }
+  .panel,
+  .stage-top,
+  .stage-bot,
+  .hint {
+    display: none !important;
+  }
+  .app, .stage, .canvas-wrap {
+    display: block !important;
+    height: auto !important;
+    width: 100% !important;
+    background: #fff !important;
+  }
+  canvas {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+}

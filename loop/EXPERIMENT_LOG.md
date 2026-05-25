@@ -1,0 +1,428 @@
+# WAVEFRONT Experiment Log
+
+The Ralph loop reads this file each tick to know what's been tried and
+what to try next. Each tick appends a new entry.
+
+## Definition of done / quality target
+
+"Good" output for the canonical test (input `examples/contour_woman.webp`,
+seed 227,225, levels 111, smooth 0.00) should visually resemble the
+reference outputs `examples/contour_woman_post*.jpeg|webp` — the same
+images the artist produced from this input.
+
+Key qualities to match:
+- Diamond-shaped concentric rings centered on the seed
+- Lines that wrap around facial features (eyes, nose, mouth shadows)
+- Background lines that fan out cleanly without noise
+- Path count in the same order of magnitude as `contour_woman_settings.webp`:
+  CHAINS 452 / PTS 135,962. WAVEFRONT should land within ~2x.
+
+Secondary target: the helmet pair
+(`examples/contour_space_pre.jpg` → `examples/contour_space_post.webp`)
+— seed unknown, infer.
+
+---
+
+## Iter 000 · Bootstrap
+
+State at loop start (2026-05-25):
+
+- CORE-parity UI complete: BOUNDS/SEED/GHOST/FIT/HOME view toggles,
+  ADVANCED disclosure hiding lum_mix and wt_range, PNG export, numbered
+  filenames.
+- Algorithm: `field = sqrt((x-sx)² + (y-sy)²) + (255 - lum) * lum_mix`
+  with default lum_mix=1.0.
+- Smoothing: Chaikin, `iterations = round(smooth_param * 4)`.
+- No tonal preprocessing (no contrast, no gamma).
+- No path simplification / no min-segment filter.
+
+Suspected gaps vs reference (untested):
+1. Source webp is dense AI-generated art with no flat background — likely
+   produces a noisy, over-saturated contour field. Reference outputs look
+   cleaner, suggesting the artist's input is tonally simpler or CORE does
+   internal cleanup we don't.
+2. WAVEFRONT modulates stroke width by `normalized_t`; CORE screenshot
+   shows uniform-looking strokes. Our `wt_range` is now hidden but still
+   defaults to 0.6 — may want to set to 0.0 to match CORE.
+3. No invert mode — some references look dark-line-on-light, ours matches,
+   but the helmet post is monochrome dense linework which may need invert.
+
+**Next:** review tick — run canonical test, view side-by-side with
+reference (`contour_woman_post1.jpeg`), write first real assessment with
+specific visual deltas.
+
+---
+
+## Iter 001 · 2026-05-25 · REVIEW — quality assessment vs reference
+
+**Hypothesis:** (review tick — no hypothesis, assessing baseline)
+
+**Change:** none
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_001.svg` (paths=37088, pts=1,198,091, t_min=40.6, t_max=774.4)
+- reference: `examples/conour_woman_post1.jpeg` + `contour_woman_post2.jpeg`
+- visual comparison:
+  - **Reference**: Clean white background. Face shows beautiful topo-map rings in
+    diamond/oval shapes around eyes, nose, mouth. Lines are long, flowing, continuous.
+    Background has very sparse, evenly spaced horizontal wavy bands. Total: 452 chains,
+    ~300 pts/chain on average.
+  - **Our output**: Entire image is nearly solid black. Tiny fragmented line segments
+    scattered everywhere — no discernible rings, no background sparsity, no facial feature
+    wrapping. Lines look like static noise rather than contours.
+
+**Gap analysis:**
+1. **Path fragmentation (critical)**: 37,088 paths vs 452 chains — 82× more paths,
+   each only ~32 pts/path avg vs ~300 pts in reference. Iso-contours shatter into tiny
+   islands because the source image has complex fine texture that creates a noisy field.
+2. **Visual density (critical)**: Image is nearly solid black. Reference has large white
+   regions. Fragmentation + short paths produce a smeared texture rather than lines.
+3. **Ring structure (critical)**: Diamond-shaped concentric rings are completely absent.
+   Reference shows unmistakable topo-map structure with seed-centered diamonds.
+4. **wt_range**: Already set to 0.0 for test — stroke width uniform, not the issue.
+
+**Suspected cause:** The input image has dense AI-generated texture. The luminance map
+transfers all this texture noise into the field, fragmenting every iso-level contour into
+hundreds of tiny disconnected pieces. CONTOUR-V CORE likely preprocesses the luminance
+with a Gaussian blur (σ≈4–8 px) to produce a smooth, noise-free field before extracting
+contours. This single fix should collapse 37,088 paths into a few hundred long chains.
+
+**Result:** worse vs. reference (baseline — no prior iteration). Gap is severe.
+
+**Next:** build — add Gaussian blur σ=4 to luminance in `engine/field.py:build_field()`.
+Test whether path count drops from 37k → ~1k and visual quality improves toward reference.
+
+---
+
+## Iter 002 · 2026-05-25 · Gaussian blur σ=4 on luminance
+
+**Hypothesis:** The source image's fine AI-generated texture fragments iso-contours into thousands of tiny disconnected segments. Blurring luminance with σ=4 before field construction should smooth noise while preserving large tonal regions (face, background), collapsing 37k paths into a few hundred long chains.
+
+**Change:** `engine/field.py:9` — added `from scipy.ndimage import gaussian_filter`. `engine/field.py:82` — added `luminance = gaussian_filter(luminance, sigma=4)` before meshgrid construction.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_002.svg` (paths=1879, pts=362,575, t_min=105.0, t_max=743.0)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Massive improvement over iter_001. Lines now flow and wrap around facial features — concentric ring structure is clearly visible around eyes, nose, forehead. Background regions show more open spacing. Hair/plant regions are still dense and branchy.
+  - **Reference**: Clean white background. Diamond-shaped rings very pronounced — almost perfectly flat/geometric on the face center, then organically wrapping around features. Extremely sparse background bands. ~452 chains.
+  - **Remaining gaps**: (1) Path count 1879 vs 452 — still ~4× too many. (2) Background areas too noisy/dense — too many small rings in texture areas. (3) Diamond shape less pronounced — ours is rounder. (4) Hair/foliage edges produce branchy tangles not in reference.
+
+**Result:** better — dramatic improvement. vs. reference: much closer but still significantly denser. Gap reduced from critical to moderate.
+
+**Next:** build — increase blur to σ=8. Path count should drop further (targeting <600). Background noise should clear. Verify that facial feature detail (eye sockets, nose bridge) survives the stronger blur.
+
+---
+
+## Iter 003 · 2026-05-25 · Gaussian blur σ=8 on luminance
+
+**Hypothesis:** Increasing blur from σ=4 to σ=8 should further reduce path count (targeting <600) by smoothing finer background texture noise while keeping large tonal regions (face, shoulders) intact.
+
+**Change:** `engine/field.py:82` — changed `gaussian_filter(luminance, sigma=4)` to `sigma=8`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_003.svg` (paths=742, pts=241,521, t_min=111.9, t_max=726.2)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Facial ring structure is clearly forming — concentric rings visible around eyes, nose, forehead. Background hair/plant regions still dense. Rings are circular/oval shape.
+  - **Reference**: Clean white background, extremely sparse wave-bands outside face. Very pronounced diamond-shaped rings on face center. Highly geometric, crisp contours.
+  - **Remaining gaps**: (1) Rings are circular vs. reference's distinctive diamond/square shape — strongest visual mismatch. (2) Background/hair still too dense (742 vs 452 paths). (3) Line spacing in face comparable but ring geometry wrong.
+
+**Result:** better vs. iter_002. vs. reference: moderate gap — ring geometry still wrong, background still dense.
+
+**Next:** build — switch distance metric from Euclidean (L2) to Manhattan (L1): L1 iso-contours are rotated squares (diamonds), which matches the reference's geometric ring shape exactly.
+
+---
+
+## Iter 004 · 2026-05-25 · Manhattan (L1) distance metric
+
+**Hypothesis:** The reference's diamond-shaped rings are characteristic of L1 (Manhattan) distance, not L2 (Euclidean). Changing `dist_field = sqrt((x-sx)²+(y-sy)²)` to `dist_field = |x-sx| + |y-sy|` should produce the rotated-square iso-contours visible in the reference. As a side effect, L1 distance distributes field values differently — may also reduce path count.
+
+**Change:** `engine/field.py:88` — changed `np.sqrt((xx - seed_x) ** 2 + (yy - seed_y) ** 2)` to `np.abs(xx - seed_x) + np.abs(yy - seed_y)`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_004.svg` (paths=547, pts=188,633, t_min=116.5, t_max=960.6)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Rings are noticeably more diamond/rectangular — clear improvement toward reference geometry. Facial features (eyes, nose bridge, mouth) still well-defined with wrapping contours. Background/hair still denser than reference but less crowded than iter_003.
+  - **Reference**: Crisp diamond rings, clean sparse background, graceful wavy bands outside face.
+  - **Remaining gaps**: (1) Background regions (hair, foliage) still too dense — 547 vs 452 target paths. (2) Diamond shapes forming but not as crisp/geometric as reference's sharp inner rings.
+
+**Result:** better vs. iter_003. vs. reference: closer — ring geometry now in correct direction, path count 547 vs 452 target (21% over).
+
+**Next:** build — try σ=12 with Manhattan to further reduce background noise. Targeting path count ≤ 480.
+
+---
+
+## Iter 005 · 2026-05-25 · Gaussian blur σ=12 on luminance
+
+**Hypothesis:** Increasing blur from σ=8 to σ=12 should further reduce path count by smoothing medium-frequency background texture (hair, foliage) while preserving large-scale face tonal regions.
+
+**Change:** `engine/field.py:82` — changed `gaussian_filter(luminance, sigma=8)` to `sigma=12`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_005.svg` (paths=334, pts=154,549, t_min=123.2, t_max=947.0)
+- reference: `examples/conour_woman_post1.jpeg` + `contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Face region has clear concentric ring structure — eye sockets, nose, mouth area all show distinct wrapping contours. Diamond/oval shape visible in forehead center region. Background/hair still denser than reference but significantly cleaner than σ=8. Lines flow well, no fragmentation noise.
+  - **Reference**: Very sparse white background, clean isolated face. Dramatic diamond geometry in forehead center — very crisp V-shaped chevron bands. Background has only a few spare wavy horizontal bands. Face ring density is similar to ours but lines are more widely spaced, more visible white between them.
+  - **Remaining gaps**: (1) Background hair/foliage still has dense curvy contour lines — reference has near-empty white space outside face. This is partly a source image issue (AI-gen texture vs cleaner original). (2) Inner diamond rings less geometrically crisp than reference. (3) Overall lines appear more compressed / less white space between them.
+
+**Result:** better vs. iter_004. vs. reference: moderately close — path count now 334 (below 452 target), face ring structure recognizable, diamond geometry forming.
+
+**Next:** build — add minimum path length filter: drop contour paths with fewer than 30 points. Should remove short isolated background fragments without touching the long face contour chains. Expect ~10-15% further path reduction and cleaner background.
+
+---
+
+## Iter 006 · 2026-05-25 · Minimum path length filter (≥30 pts)
+
+**Hypothesis:** Short isolated contour fragments (<30 pts) contribute to background noise without adding visible ring structure. Filtering them should reduce path count and clean up scattered dots/stubs.
+
+**Change:** `engine/contour.py:63` — changed `if len(path) < 2:` to `if len(path) < 30:`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_006.svg` (paths=314, pts=154,172, t_min=123.2, t_max=947.0)
+- reference: `examples/conour_woman_post1.jpeg`
+- visual comparison:
+  - **Our output**: Face contours clearly wrap around eyes, nose, mouth. Ring structure visible, some diamond geometry in forehead region. Hair/background still has dense curvy lines covering most of the image. Lines are black on white background.
+  - **Reference**: Forehead shows crisp, nearly flat horizontal lines breaking into very clean geometric V-shaped diamond chevrons. The inner diamond zone is architecturally regular, not organic. Background/hair has fan-shaped structured lines, large white-space areas at image edges.
+  - **Remaining gaps**: (1) Forehead lacks the crisp geometric diamond — ours is more organic/wavy. (2) Background/hair still too dense. (3) Outer edges of image lack the large white-space bands of reference. The filter only removed 20 paths (6% drop) — most paths are long and survive.
+
+**Result:** marginally better vs. iter_005. vs. reference: roughly neutral improvement — minor cleanup, main gaps unchanged.
+
+**Next:** build — increase Gaussian blur σ from 12 to 16. Smoother forehead luminance → more geometric L1 diamond chevrons. Expect path count to drop further (~250–280) and white space to increase.
+
+---
+
+## Iter 007 · 2026-05-25 · Gaussian blur σ=16 on luminance
+
+**Hypothesis:** Increasing blur from σ=12 to σ=16 will smooth the forehead luminance further, producing crisper geometric L1 diamond chevrons and reducing closed contour loops in hair/background.
+
+**Change:** `engine/field.py:82` — changed `gaussian_filter(luminance, sigma=12)` to `sigma=16`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_007.svg` (paths=248, pts=136,205, t_min=131.3, t_max=950.3)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Face structure excellent — concentric rings wrap around eyes, nose, mouth with clear diamond-ish geometry in the forehead. Background (hair, plants) still has many closed-loop contours, denser than reference. Lines are clean, no fragmentation noise.
+  - **Reference**: Very crisp flat-sided diamond chevrons in forehead. Background shows long nearly-horizontal wavy bands with large white-space areas at edges. Lines in background flow through rather than looping around texture features.
+  - **Key metric**: Total points nearly identical (136,205 ours vs 135,962 reference). But distributed in 248 paths vs 452 chains — our paths are 1.8× longer on average, meaning lines wind more (closed loops) vs reference's longer, straighter flowing bands.
+  - **Remaining gaps**: (1) Background still has closed loops from hair/plant texture — needs more blur or lighter background. (2) Forehead diamond getting closer but still slightly more oval than reference's flat-sided shape.
+
+**Result:** better vs. iter_006. vs. reference: noticeably closer — diamond geometry forming, face structure strong.
+
+**Next:** build — increase σ to 20. Background closed loops persist; more blur should suppress remaining medium-scale texture variation in hair/plants. Total points target: ~120k.
+
+---
+
+## Iter 012 · 2026-05-25 · Gaussian blur σ=20 on luminance
+
+**Hypothesis:** Increasing blur from σ=16 to σ=20 should suppress medium-frequency background texture (hair, foliage) enough to convert closed-loop bubble contours in the background into longer open-flowing bands.
+
+**Change:** `engine/field.py:87` — changed `gaussian_filter(luminance, sigma=16)` to `sigma=20`. (Note: iters 008–011 in output folder are undocumented runs from previous ticks — code was left at σ=16 when this tick started.)
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_012.svg` (paths=218, pts=127,642, t_min=140.4, t_max=949.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Face ring structure clearly visible with wrapping contours around eyes, nose, mouth. Forehead shows rectangular/diamond rings. Background (hair, plants) still has small closed-loop bubble contours creating dense gray texture. Overall density slightly lower than σ=16.
+  - **Reference**: Very sparse background — only long, flowing nearly-horizontal wavy bands with large white areas. Inner forehead has crisp flat-sided diamond rings. 452 chains vs our 218 (fewer paths but reference paths are shorter open curves; ours are longer closed loops winding around texture features).
+  - **Key gap**: Background region topology — our paths form closed loops around hair/plant texture features; reference paths are open flowing curves. This isn't fixed by simply reducing path count.
+
+**Result:** marginally better vs. iter_007 (248→218 paths, 136k→128k pts). vs. reference: same structural gap — background closed loops persist despite increased blur.
+
+**Next:** build — increase σ to 30. Hair/foliage texture has frequency components at wavelengths >40px that σ=20 doesn't suppress. σ=30 should flatten background luminance into a near-uniform plateau so iso-levels become simple nearly-parallel bands rather than closed loops.
+
+---
+
+## Iter 013 · 2026-05-25 · Gaussian blur σ=30 on luminance
+
+**Hypothesis:** Hair/foliage texture has frequency components at wavelengths >40px that σ=20 doesn't suppress. σ=30 should flatten background luminance into a near-uniform plateau so iso-levels become simple nearly-parallel bands rather than closed loops.
+
+**Change:** `engine/field.py:87` — changed `gaussian_filter(luminance, sigma=20)` to `sigma=30`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_013.svg` (paths=200, pts=120,872, t_min=161.2, t_max=940.2)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Major visual improvement. Background now shows long flowing nearly-horizontal wavy bands instead of closed bubble loops — much closer to reference's sparse wavy background. Face region shows clean ring structure wrapping around eyes, nose with diamond geometry in forehead. Much more white space visible overall.
+  - **Reference**: 452 chains, finely wrapping face contours, very sparse background, crisp diamond center.
+  - **Remaining gaps**: (1) Face detail reduced — σ=30 over-smoothed the face luminance, losing fine wrapping detail around eye sockets, nose bridge. Reference has ~452 paths; we have 200 with longer average path length. (2) Background still has some medium-density regions in corners. (3) Fundamental tension: higher σ → cleaner background but fewer face contours.
+
+**Result:** better — significant improvement. Background topology transformed from closed loops to open flowing bands. vs. reference: closer but new gap: face under-detailed.
+
+**Next:** build — adaptive blur: blend lightly-blurred (σ=8) and heavily-blurred (σ=30) luminance by pixel brightness. Dark face pixels → light blur (preserves fine wrapping detail). Bright background pixels → heavy blur (cleans closed loops). This should give reference-quality background AND reference-quality face detail simultaneously.
+
+---
+
+## Iter 024 · 2026-05-25 · REVIEW — assess code state after undocumented iters 014–023
+
+**Hypothesis:** (review tick — no hypothesis, assessing current baseline)
+
+**Change:** none
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_024.svg` (paths=222, pts=120,064, t_min=131.3, t_max=894.1)
+- reference: `examples/conour_woman_post1.jpeg` + `contour_woman_post2.jpeg`
+- current code: spatial adaptive blur σ=16 (face zone, inner_r=0.20×min(H,W)) / σ=50 (background, outer_r=0.35×min(H,W)); L1 distance; effective_lum_mix=1.0×face + 0.60×background; min_path_length=30.
+- visual comparison:
+  - **Our output**: Face ring structure visible — concentric rings wrap around eyes, nose, mouth. Forehead shows some diamond-ish geometry. Background/hair transition zone has grayish density from closed loops around dark hair/plant texture. Lines are clean and non-fragmented.
+  - **Reference**: Crisp flat-sided diamond rings in forehead center, eye sockets/nose bridge sharply defined, background shows long sparse flowing nearly-horizontal bands with large white space. 452 chains total.
+  - **Key gap**: Background effective_lum_mix=0.60 still lets dark hair (lum≈50 → value=200) contribute 200×0.60=120 to the field, enough to create closed loops around hair texture despite σ=50 blur. Diamond geometry forming but rings still more circular/organic than reference's crisp flat-sided diamonds.
+
+**Result:** baseline for this review. vs. reference: moderate gap on background density and face diamond crispness.
+
+**Next:** build — reduce background effective_lum_mix 0.60→0.15 so far-field iso-levels are 85% radial L1 (flowing bands) and only 15% lum-modulated. Hypothesis: breaks closed loops, creates more open flowing background similar to reference.
+
+---
+
+## Iter 025 · 2026-05-25 · Reduce background lum_mix 0.60→0.15
+
+**Hypothesis:** Background effective_lum_mix=0.60 still allows dark hair/plant texture to create closed contour loops despite σ=50 blur. Dropping to 0.15 makes the background field 85% L1 radial distance → iso-levels become open flowing bands rather than closed topology loops.
+
+**Change:** `engine/field.py:101` — changed `dist_weight * 0.60` to `dist_weight * 0.15`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_025.svg` (paths=252, pts=121,357, t_min=131.3, t_max=843.0)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Face diamond rings noticeably crisper and more pronounced — clearest diamond geometry seen so far. Eye sockets and nose bridge well defined. Background now shows uniform fine diagonal hatching (~6px spacing between lines) — characteristic of pure L1 diamond iso-contours evenly filling the image.
+  - **Reference**: Sparse flowing background bands with large white spaces, crisp face with tight wrapping contours. 452 chains.
+  - **Trade-off**: Face quality clearly improved over iter_024. Background traded "closed organic loops" for "uniform L1 diagonal hatching" — neither matches the reference's sparse flowing bands, but the uniform hatching is at least structured.
+  - **Root cause of uniform hatching**: At lum_mix=0.15 in background, field is 85% L1 radial → 111 iso-levels spaced evenly every ~6px across the background. No variation in density, no white space.
+
+**Result:** slightly better overall — face improvement outweighs background regression. vs. reference: face closer, background still wrong (now too uniformly dense rather than organically dense).
+
+**Next:** build — try background effective_lum_mix = 0.30 (middle ground between 0.15 and 0.60). Should add enough organic luminance variation to break pure-L1 uniformity and create flowing variety in background, without re-introducing closed loops around dark texture.
+
+---
+
+## Iter 026 · 2026-05-25 · Background lum_mix 0.15→0.30 (middle ground)
+
+**Hypothesis:** background effective_lum_mix=0.15 produces pure-L1 uniform diagonal hatching because it's nearly radial. Increasing to 0.30 should add enough organic luminance variation to break the pure-L1 uniformity and create flowing variety.
+
+**Change:** `engine/field.py:101` — changed `dist_weight * 0.15` to `dist_weight * 0.30`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_026.svg` (paths=236, pts=119,748, t_min=131.3, t_max=860.0)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Nearly identical to iter_025 — background still shows uniform fine L1 diagonal hatching. Face ring structure visible. Change from 0.15 to 0.30 produced negligible visible difference.
+  - **Reference**: Sparse organic flowing wavy bands with large white space between them.
+  - **Root cause identified**: σ=50 over-blurs background luminance to near-uniform → lum contribution is nearly constant → field ≈ pure L1 regardless of lum_mix value. The problem isn't lum_mix coefficient; it's that σ=50 has eliminated the luminance variation needed for organic waviness. σ=30 globally (iter_013) produced open flowing bands precisely because it's strong enough to prevent closed loops while weak enough to retain organic waviness.
+
+**Result:** same as iter_025. vs. reference: no improvement. Root cause is over-blurred background (σ=50), not lum_mix coefficient.
+
+**Next:** build — switch to σ=8 face / σ=30 background. σ=30 background verified in iter_013 to produce open organic flowing bands. σ=8 face gives finer facial detail than σ=16. Restore lum_mix=1.0 throughout (spatial adaptive blur does the work, lum_mix reduction no longer needed).
+
+---
+
+## Iter 027 · 2026-05-25 · σ=8 face / σ=30 background, lum_mix=1.0 uniform
+
+**Hypothesis:** σ=50 background over-blurs luminance to near-uniform, eliminating the organic variation needed for wavy bands. σ=30 was validated in iter_013 to produce open flowing bands. σ=8 face should give finer wrapping detail than σ=16. Restoring lum_mix=1.0 throughout lets the smoothed luminance create organic variation instead of near-uniform L1.
+
+**Change:** `engine/field.py:84–85` — changed `sigma=16` to `sigma=8`, `sigma=50` to `sigma=30`. `engine/field.py:101` — simplified `effective_lum_mix = lum_mix` (removed the dist_weight*0.30 reduction).
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_027.svg` (paths=241, pts=134,034, t_min=116.5, t_max=940.2)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Major improvement over iter_026! Background now shows organic wavy flowing bands — clearly recognizable topo-map style in the background, not uniform L1 hatching. Face detail excellent: eyes, nose, mouth all show tight wrapping contours. Diamond ring structure visible in the forehead. Overall image is dense but organically structured.
+  - **Reference**: Similar organic background bands, crisp diamond face, but with significantly more white space between lines (reference is ~2–3× less dense in background).
+  - **Remaining gap**: Background still too dense. Lines are ~6–8px apart; reference shows ~15–20px spacing in background. Both have similar total points (ours 134k vs reference 135k) but ours has 241 longer paths vs 452 shorter chains. The visual density difference may also relate to: (1) our source image has dark hair/plants filling the background; (2) reference source likely had near-white studio background.
+
+**Result:** significantly better vs. iter_026. vs. reference: closer — organic band topology now correct, face detail good, spacing still too dense.
+
+**Next:** build — add slight background lum_mix reduction (effective_lum_mix=0.70 in far background). With σ=30, background lum variation is still ±~30 units. At 0.70, this becomes ±21 units → still enough for organic waviness but reduces density by ~15–20%.
+
+---
+
+## Iter 028 · 2026-05-25 · Background lum_mix 0.70 in far background
+
+**Hypothesis:** Background effective_lum_mix=1.0 still lets background luminance variation create tight contour spacing. Reducing to 0.70 in the far-field region (dist_weight=1.0) reduces dark-hair/plant contribution by ~30% → ~15-20% fewer background levels.
+
+**Change:** `engine/field.py:101` — changed `effective_lum_mix = lum_mix` to `effective_lum_mix = lum_mix * ((1.0 - dist_weight) * 1.0 + dist_weight * 0.70)`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_028.svg` (paths=247, pts=131,380, t_min=116.5, t_max=905.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Organic wavy background bands (same topology as iter_027). Face shows wrapping rings with some diamond geometry. Lines visually similar to iter_027 — density still ~6–8px throughout background.
+  - **Reference**: Sparse background bands at ~15–20px spacing, crisp diamond rings in face with large white-space gaps.
+  - **Root cause**: lum_mix reduction of 0.70 (vs 1.0) changes only the luminance amplitude in background, not the L1 distance contribution. The background covers a wide t-range (t ≈ 450–906 = 456 units) receiving ~64 of the 111 iso-levels at ~7px spacing. The face only gets ~33 levels. Linear iso-level spacing fundamentally mismatches the reference's density distribution.
+
+**Result:** same as iter_027. vs. reference: no improvement. Root cause: linear iso-level spacing, not lum_mix value.
+
+**Next:** build — switch to **quadratic iso-level spacing** in `engine/contour.py:compute_thresholds`. Replace linear `t[i] = t_min + i*step` with quadratic `t[i] = t_min + (i/N)^2 * range`. Background will receive ~39 levels (vs 64 linear) → ~11–12px spacing. Face will receive ~60 levels (vs 33 linear) → better diamond density. Prediction: closer to reference on both axes simultaneously.
+
+---
+
+## Iter 029–030 · 2026-05-25 · Quadratic iso-level spacing (power=1.5) [undocumented catch-up]
+
+**Note:** These two iterations were executed but not logged. Current engine state (contour.py) shows power=1.5 quadratic spacing was implemented per iter_028's "next" recommendation. Outputs exist as iter_029.png / iter_030.png. Based on visual inspection: iter_029 showed improved background white-space vs iter_028 (flowing bands, moderate density); iter_030 was slightly denser. The power=1.5 change was the substantive improvement — current baseline entering iter_031.
+
+---
+
+## Iter 031 · 2026-05-25 · Baseline documentation (σ=8/30, power=1.5, lum_mix*0.70 bg)
+
+**Hypothesis:** (baseline tick — documenting current state before next change)
+
+**Change:** none — running canonical test to establish iter_031 baseline
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_031.svg` (paths=251, pts=129,627, t_min=116.5, t_max=905.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: Organic wavy background bands throughout — flowing wavy lines but dense (~6–8px spacing). Face shows diamond geometry at nose/forehead. Overall density too high vs reference.
+  - **Reference**: Very sparse background (large white regions between bands ~15–20px), crisp large outer diamond ring around forehead, well-defined eyes/features.
+  - **Root cause identified**: Bright cyan source background should → low lum_field in background → sparse bands. But σ=30 is insufficient to blend dark hair into bright background; dark hair elements retain enough luminance variation after blur to create many iso-level crossings → background stays dense. Solution: dramatically increase background sigma.
+
+**Result:** same as iter_030 (no change).
+
+**Next:** build — increase background sigma σ=30 → σ=80. Source image has bright cyan background; σ=80 on 640px image averages over ~240px radius → dark hair completely absorbed into bright background average → near-uniform background luminance → sparse L1 diamond bands.
+
+---
+
+## Iter 032 · 2026-05-25 · Background sigma σ=30 → σ=80
+
+**Hypothesis:** σ=30 is insufficient to homogenize dark hair into bright cyan background. With σ=80 (radius ~240px on 640px image), the weighted average of dark hair + bright cyan converges to near-global-average luminance in the background → minimal luminance variation → iso-levels become nearly pure L1 concentric diamonds → sparse, widely-spaced background bands.
+
+**Change:** `engine/field.py:85` — changed `gaussian_filter(luminance, sigma=30)` to `gaussian_filter(luminance, sigma=80)`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_032.svg` (paths=254, pts=127,781, t_min=116.5, t_max=912.5)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: DRAMATIC improvement in background density. Top-left, bottom-left, bottom-right all show sparse widely-spaced wavy bands (~15–20px) matching the reference. Face retains good diamond ring geometry (σ=8 near seed unaffected). Top-right still has dense L1 diagonal hatching from residual metallic sparkle luminance variation even after σ=80. Overall: ~2–3× sparser background than iter_031.
+  - **Reference**: Very sparse horizontal wavy background bands, large white space, crisp prominent outer diamond ring on forehead, well-defined eye/nose/chin rings.
+  - **Remaining gap**: (1) top-right diagonal L1 hatching still too dense; (2) face outer diamond ring less prominent than reference; (3) band orientation slightly more concentric (ours) vs horizontal wavy (reference).
+
+**Result:** significantly better vs. iter_031. vs. reference: closer — background density now matches in most regions, top-right still too dense.
+
+**Next:** build — try power=2.0 (from power=1.5) in `engine/contour.py:compute_thresholds`. Should concentrate ~60% of 111 levels in face region vs current ~45%, leaving top-right corner with fewer iso-levels → less diagonal hatching. Also strengthens face diamond ring prominence.
+
+---
+
+## Iter 033–035 · 2026-05-25 · Undocumented [catch-up note]
+
+power=2.0 was implemented in contour.py per iter_032 "next". lum_light sigma was reverted from σ=8 back to σ=16 (face detail slightly worse at σ=8 with power=2.0 concentrating more levels there). Outputs iter_033–035 exist. Final state entering iter_036: lum_light σ=16, lum_heavy σ=80, power=2.0, lum_mix*0.70 bg. This produced 45° diagonal corner hatching (pure L1 artifact from σ=80 making background near-uniform).
+
+---
+
+## Iter 036 · 2026-05-25 · Background sigma σ=80 → σ=30 (restore organic waviness)
+
+**Hypothesis:** σ=80 makes background luminance near-uniform → field ≈ pure L1 → harsh 45° diagonal hatching in corners. σ=30 (validated in iter_013/027) retains organic luminance variation → iso-levels flow organically. Combined with power=2.0 (not available in iter_031 when σ=30 last tested), expect sparser, more organic background than iter_031.
+
+**Change:** `engine/field.py:85` — changed `gaussian_filter(luminance, sigma=80)` to `sigma=30`.
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_036.svg` (paths=203, pts=111,315, t_min=131.3, t_max=905.9)
+- reference: `examples/contour_woman_post2.jpeg`
+- visual comparison:
+  - **Our output**: 45° diagonal corner hatching completely eliminated. Background now shows organically flowing wavy lines throughout — much closer to reference topology. Face diamond ring structure visible around nose/forehead. Clear concentric wrapping around eye sockets. Lines are ~5-8px apart throughout.
+  - **Reference**: Sparse flowing background bands (~15-20px spacing), crisp prominent diamond rings in face, large white regions between lines.
+  - **Remaining gaps**: (1) Line density still too high — ~5-8px vs reference's ~15-20px background spacing. (2) Mid-range transition zone (face-to-background, t≈200-500) still moderately dense. (3) Large dominant outer diamond ring not as prominent as reference.
+
+**Result:** significantly better vs. iter_035. vs. reference: closer — background topology now correct (organic wavy), main gap is density.
+
+**Next:** build — increase power from 2.0 to 2.5 in `engine/contour.py:compute_thresholds`. power=2.5 concentrates ~73 levels in face (vs ~66 at p=2.0) and leaves only ~38 levels in background (vs ~46). Background spacing should increase from ~8px to ~12-15px. No other changes.

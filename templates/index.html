@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WAVEFRONT // CONTOUR-V ENGINE</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --surface: #111;
+      --surface-2: #161616;
+      --border: #1e1e1e;
+      --border-2: #2a2a2a;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --text-mute: #555;
+      --accent: #00ff88;
+      --gold: #c8a800;
+      --danger: #e63030;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      overflow: hidden;
+    }
+    .app {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* ---------- LEFT PANEL ---------- */
+    .panel {
+      width: 300px;
+      min-width: 300px;
+      background: var(--bg);
+      border-right: 1px solid #222;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .brand {
+      padding: 18px 16px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand h1 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.15em;
+    }
+    .brand .sub {
+      font-size: 9px;
+      color: var(--text-mute);
+      letter-spacing: 0.2em;
+      margin-top: 4px;
+    }
+    .section {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-label {
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 0.2em;
+      margin-bottom: 10px;
+    }
+
+    /* Upload */
+    .drop {
+      display: block;
+      border: 1px dashed #333;
+      background: var(--surface);
+      padding: 22px 12px;
+      text-align: center;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 10px;
+      transition: all 0.15s ease;
+      letter-spacing: 0.12em;
+    }
+    .drop:hover {
+      border-color: #4a4a4a;
+      color: var(--text);
+    }
+    .drop.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #0f1a14;
+    }
+    .drop .fname {
+      color: var(--accent);
+      margin-top: 8px;
+      word-break: break-all;
+      font-size: 9px;
+      letter-spacing: 0.05em;
+    }
+    .drop input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Sliders */
+    .slider-row {
+      margin-bottom: 10px;
+    }
+    .slider-row:last-child { margin-bottom: 0; }
+    .slider-head {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+      font-size: 10px;
+    }
+    .slider-head .name { color: var(--text-dim); }
+    .slider-head .val { color: var(--text); font-variant-numeric: tabular-nums; }
+    input[type=range] {
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 2px;
+      background: #2a2a2a;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--gold);
+      cursor: pointer;
+      border: none;
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--gold);
+      cursor: pointer;
+      border: none;
+    }
+
+    /* Seed */
+    .seed-disp {
+      font-size: 10px;
+      color: var(--text);
+      margin-bottom: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .btn {
+      width: 100%;
+      padding: 8px 10px;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border-2);
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .btn.primary {
+      background: var(--gold);
+      color: #fff;
+      border-color: var(--gold);
+      font-weight: 600;
+    }
+    .btn.primary:hover {
+      background: #d9b800;
+      color: #fff;
+      border-color: #d9b800;
+    }
+    .btn.primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .btn + .btn { margin-top: 6px; }
+    .btn.sm {
+      padding: 5px 8px;
+      font-size: 9px;
+      letter-spacing: 0.18em;
+      width: auto;
+      background: transparent;
+      color: var(--text-dim);
+      border-color: var(--border);
+    }
+    .btn.sm:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .btn.sm.on {
+      color: #0d0d0d;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .toolbar {
+      display: flex;
+      gap: 4px;
+    }
+
+    /* Advanced collapsible */
+    .adv-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .adv-head .caret {
+      color: var(--text-mute);
+      transition: transform 0.18s ease;
+    }
+    .adv.open .adv-head .caret {
+      transform: rotate(90deg);
+      color: var(--accent);
+    }
+    .adv-body {
+      display: none;
+      margin-top: 10px;
+    }
+    .adv.open .adv-body {
+      display: block;
+    }
+
+    /* Stats grid */
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+    }
+    .stat .k {
+      font-size: 8px;
+      color: var(--text-mute);
+      letter-spacing: 0.18em;
+      margin-bottom: 2px;
+    }
+    .stat .v {
+      font-size: 11px;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .status-line {
+      padding: 10px 16px;
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+      border-top: 1px solid var(--border);
+      margin-top: auto;
+    }
+    .status-line.err { color: var(--danger); }
+    .status-line.ok { color: var(--accent); }
+
+    /* ---------- RIGHT PANEL ---------- */
+    .stage {
+      flex: 1;
+      background: #111;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .stage-top, .stage-bot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      font-size: 9px;
+      color: var(--accent);
+      letter-spacing: 0.2em;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .stage-bot {
+      border-top: 1px solid var(--border);
+      border-bottom: none;
+      color: var(--text-dim);
+    }
+    .stage-bot .right { color: var(--text); font-variant-numeric: tabular-nums; }
+
+    .canvas-wrap {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px) 0 0 / 24px 24px,
+        #0a0a0a;
+    }
+    canvas {
+      position: absolute;
+      top: 0; left: 0;
+      cursor: crosshair;
+      display: block;
+    }
+    .hint {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: var(--text-mute);
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-align: center;
+      pointer-events: none;
+    }
+    .hint .big {
+      color: var(--accent);
+      font-size: 13px;
+      margin-bottom: 8px;
+      letter-spacing: 0.2em;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- LEFT PANEL -->
+  <aside class="panel">
+    <div class="brand">
+      <h1>WAVEFRONT</h1>
+      <div class="sub">CONTOUR-V ENGINE</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">SOURCE</div>
+      <label class="drop" id="drop">
+        <div id="drop-text">DROP IMAGE OR CLICK</div>
+        <div class="fname" id="fname"></div>
+        <input type="file" id="file" accept="image/*">
+      </label>
+    </div>
+
+    <div class="section">
+      <div class="section-label">CONTOUR</div>
+      <div class="slider-row">
+        <div class="slider-head"><span class="name">LEVELS</span><span class="val" id="v-levels">63</span></div>
+        <input type="range" id="s-levels" min="10" max="150" step="1" value="63">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">LINEWORK</div>
+      <div class="slider-row">
+        <div class="slider-head"><span class="name">SMOOTH</span><span class="val" id="v-smooth">0.70</span></div>
+        <input type="range" id="s-smooth" min="0" max="1" step="0.05" value="0.70">
+      </div>
+    </div>
+
+    <div class="section adv" id="adv-section">
+      <div class="adv-head" id="adv-toggle">
+        <span class="section-label" style="margin: 0;">ADVANCED</span>
+        <span class="caret">▶</span>
+      </div>
+      <div class="adv-body">
+        <div class="slider-row">
+          <div class="slider-head"><span class="name">LUM MIX</span><span class="val" id="v-lum">1.00</span></div>
+          <input type="range" id="s-lum" min="0" max="2" step="0.05" value="1.00">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span class="name">WT RANGE</span><span class="val" id="v-wt">0.60</span></div>
+          <input type="range" id="s-wt" min="0" max="1" step="0.05" value="0.60">
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">SEED</div>
+      <div class="seed-disp" id="seed-disp">Seed: (—, —)</div>
+      <button class="btn" id="b-reset">RESET TO CENTER</button>
+    </div>
+
+    <div class="section">
+      <div class="section-label">LIVE</div>
+      <div class="stats">
+        <div class="stat"><div class="k">PATHS</div><div class="v" id="st-paths">—</div></div>
+        <div class="stat"><div class="k">POINTS</div><div class="v" id="st-points">—</div></div>
+        <div class="stat"><div class="k">LEVELS</div><div class="v" id="st-levels">—</div></div>
+        <div class="stat"><div class="k">SEGS</div><div class="v" id="st-segs">—</div></div>
+        <div class="stat"><div class="k">GRID</div><div class="v" id="st-grid">—</div></div>
+        <div class="stat"><div class="k">T RANGE</div><div class="v" id="st-trng">—</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">EXPORT</div>
+      <button class="btn primary" id="b-compute">COMPUTE</button>
+      <button class="btn" id="b-svg">EXPORT SVG</button>
+      <button class="btn" id="b-png">EXPORT PNG</button>
+      <button class="btn" id="b-copy">COPY SVG</button>
+    </div>
+
+    <div class="status-line" id="status">READY</div>
+  </aside>
+
+  <!-- RIGHT PANEL -->
+  <section class="stage">
+    <div class="stage-top">
+      <div>OUTPUT PREVIEW</div>
+      <div class="toolbar">
+        <button class="btn sm" id="t-bounds">BOUNDS</button>
+        <button class="btn sm on" id="t-seed">SEED</button>
+        <button class="btn sm on" id="t-ghost">GHOST</button>
+        <button class="btn sm" id="t-fit">FIT</button>
+        <button class="btn sm" id="t-home">HOME</button>
+      </div>
+    </div>
+    <div class="canvas-wrap" id="wrap">
+      <canvas id="cv"></canvas>
+      <div class="hint" id="hint">
+        <div class="big">WAVEFRONT</div>
+        <div>UPLOAD AN IMAGE TO BEGIN</div>
+      </div>
+    </div>
+    <div class="stage-bot">
+      <div id="bot-left">LEVELS — | SEGS — | CHAINS — | PTS —</div>
+      <div class="right" id="bot-right">SEED: (—, —)</div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- State ----------
+  const state = {
+    file: null,
+    dataUrl: null,
+    imgW: 0,
+    imgH: 0,
+    seedX: null,
+    seedY: null,
+    lastSvg: null,
+    ghostImg: null,
+    titleSlug: 'Untitled',
+    exportCount: 0,
+    view: { bounds: false, seed: true, ghost: true },
+  };
+
+  // ---------- DOM refs ----------
+  const drop = $('drop');
+  const fileInput = $('file');
+  const fname = $('fname');
+  const dropText = $('drop-text');
+
+  const sLevels = $('s-levels'), vLevels = $('v-levels');
+  const sSmooth = $('s-smooth'), vSmooth = $('v-smooth');
+  const sLum = $('s-lum'), vLum = $('v-lum');
+  const sWt = $('s-wt'), vWt = $('v-wt');
+
+  const seedDisp = $('seed-disp');
+  const bReset = $('b-reset');
+  const bCompute = $('b-compute');
+  const bSvg = $('b-svg');
+  const bPng = $('b-png');
+  const bCopy = $('b-copy');
+
+  const tBounds = $('t-bounds'), tSeed = $('t-seed'), tGhost = $('t-ghost'),
+        tFit = $('t-fit'), tHome = $('t-home');
+  const advSection = $('adv-section'), advToggle = $('adv-toggle');
+
+  const statPaths = $('st-paths'), statPoints = $('st-points'),
+        statLevels = $('st-levels'), statSegs = $('st-segs'),
+        statGrid = $('st-grid'), statTrng = $('st-trng');
+
+  const statusEl = $('status');
+  const wrap = $('wrap');
+  const cv = $('cv');
+  const ctx = cv.getContext('2d');
+  const hint = $('hint');
+  const botLeft = $('bot-left');
+  const botRight = $('bot-right');
+
+  // ---------- Slider value display ----------
+  const bindSlider = (slider, valEl, decimals = 0) => {
+    const update = () => {
+      const v = parseFloat(slider.value);
+      valEl.textContent = decimals === 0 ? v.toString() : v.toFixed(decimals);
+    };
+    slider.addEventListener('input', update);
+    update();
+  };
+  bindSlider(sLevels, vLevels, 0);
+  bindSlider(sSmooth, vSmooth, 2);
+  bindSlider(sLum, vLum, 2);
+  bindSlider(sWt, vWt, 2);
+
+  // ---------- Status helpers ----------
+  const setStatus = (msg, kind = '') => {
+    statusEl.textContent = msg;
+    statusEl.className = 'status-line ' + kind;
+  };
+
+  // ---------- Canvas sizing & rendering ----------
+  function fitCanvas() {
+    const r = wrap.getBoundingClientRect();
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    cv.width = Math.floor(r.width * dpr);
+    cv.height = Math.floor(r.height * dpr);
+    cv.style.width = r.width + 'px';
+    cv.style.height = r.height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    redraw();
+  }
+  window.addEventListener('resize', fitCanvas);
+
+  function imgToCanvasTransform() {
+    if (!state.imgW || !state.imgH) return null;
+    const cw = cv.clientWidth, ch = cv.clientHeight;
+    const scale = Math.min(cw / state.imgW, ch / state.imgH) * 0.96;
+    const dispW = state.imgW * scale;
+    const dispH = state.imgH * scale;
+    const ox = (cw - dispW) / 2;
+    const oy = (ch - dispH) / 2;
+    return { scale, ox, oy, dispW, dispH };
+  }
+
+  function clearCanvas() {
+    ctx.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
+  }
+
+  function drawGhost() {
+    if (!state.view.ghost || !state.ghostImg) return;
+    const t = imgToCanvasTransform();
+    if (!t) return;
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.drawImage(state.ghostImg, t.ox, t.oy, t.dispW, t.dispH);
+    ctx.restore();
+  }
+
+  function drawBounds() {
+    if (!state.view.bounds || !state.imgW) return;
+    const t = imgToCanvasTransform();
+    if (!t) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.55)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(t.ox + 0.5, t.oy + 0.5, t.dispW - 1, t.dispH - 1);
+    ctx.restore();
+  }
+
+  function drawSeedDot() {
+    if (!state.view.seed || state.seedX == null) return;
+    const t = imgToCanvasTransform();
+    if (!t) return;
+    const cx = t.ox + state.seedX * t.scale;
+    const cy = t.oy + state.seedY * t.scale;
+    ctx.save();
+    ctx.fillStyle = '#e63030';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  let renderedSvgImg = null;
+  function drawRenderedSvg() {
+    if (!renderedSvgImg) return;
+    const t = imgToCanvasTransform();
+    if (!t) return;
+    ctx.drawImage(renderedSvgImg, t.ox, t.oy, t.dispW, t.dispH);
+  }
+
+  function redraw() {
+    clearCanvas();
+    drawGhost();
+    drawRenderedSvg();
+    drawBounds();
+    drawSeedDot();
+  }
+
+  // ---------- View toggles ----------
+  function syncToggleUI() {
+    tBounds.classList.toggle('on', state.view.bounds);
+    tSeed.classList.toggle('on', state.view.seed);
+    tGhost.classList.toggle('on', state.view.ghost);
+  }
+  tBounds.addEventListener('click', () => { state.view.bounds = !state.view.bounds; syncToggleUI(); redraw(); });
+  tSeed.addEventListener('click', () => { state.view.seed = !state.view.seed; syncToggleUI(); redraw(); });
+  tGhost.addEventListener('click', () => { state.view.ghost = !state.view.ghost; syncToggleUI(); redraw(); });
+  tFit.addEventListener('click', () => { fitCanvas(); });
+  tHome.addEventListener('click', () => {
+    state.view = { bounds: false, seed: true, ghost: true };
+    syncToggleUI();
+    fitCanvas();
+  });
+
+  // ---------- Advanced disclosure ----------
+  advToggle.addEventListener('click', () => advSection.classList.toggle('open'));
+
+  // ---------- File upload handling ----------
+  function handleFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      setStatus('NOT AN IMAGE FILE', 'err');
+      return;
+    }
+    state.file = file;
+    state.titleSlug = slugifyTitle(file.name);
+    fname.textContent = file.name;
+    dropText.textContent = 'REPLACE IMAGE';
+    setStatus('UPLOADING THUMBNAIL...');
+
+    const fd = new FormData();
+    fd.append('image', file);
+
+    fetch('/thumbnail', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(j => {
+        if (j.error) { setStatus('ERR: ' + j.error, 'err'); return; }
+        state.dataUrl = j.data_url;
+        state.imgW = j.width;
+        state.imgH = j.height;
+        state.seedX = Math.floor(j.width / 2);
+        state.seedY = Math.floor(j.height / 2);
+        updateSeedDisp();
+
+        const img = new Image();
+        img.onload = () => {
+          state.ghostImg = img;
+          renderedSvgImg = null;
+          hint.style.display = 'none';
+          redraw();
+          setStatus('READY. CLICK CANVAS TO SEED OR COMPUTE.', 'ok');
+        };
+        img.src = j.data_url;
+      })
+      .catch(err => setStatus('ERR: ' + err.message, 'err'));
+  }
+
+  // Label wraps the input, so click on .drop natively opens the picker —
+  // no manual fileInput.click() call (that caused double-fires).
+  fileInput.addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (f) handleFile(f);
+    // Reset so picking the same file again still fires change.
+    e.target.value = '';
+  });
+
+  // Drag highlight — only highlight on the drop zone.
+  ['dragenter', 'dragover'].forEach(ev =>
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      drop.classList.add('active');
+    })
+  );
+  ['dragleave'].forEach(ev =>
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.remove('active');
+    })
+  );
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drop.classList.remove('active');
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+
+  // Prevent the browser from navigating away when a file is dropped anywhere
+  // else in the window (default behavior would open the file).
+  ['dragover', 'drop'].forEach(ev =>
+    window.addEventListener(ev, (e) => {
+      if (e.target.closest && e.target.closest('#drop')) return;
+      e.preventDefault();
+    })
+  );
+
+  // ---------- Canvas click → seed ----------
+  cv.addEventListener('click', (e) => {
+    if (!state.imgW) return;
+    const t = imgToCanvasTransform();
+    if (!t) return;
+    const rect = cv.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const ix = Math.round((cx - t.ox) / t.scale);
+    const iy = Math.round((cy - t.oy) / t.scale);
+    if (ix < 0 || iy < 0 || ix >= state.imgW || iy >= state.imgH) return;
+    state.seedX = ix;
+    state.seedY = iy;
+    updateSeedDisp();
+    redraw();
+  });
+
+  function updateSeedDisp() {
+    if (state.seedX == null) {
+      seedDisp.textContent = 'Seed: (—, —)';
+      botRight.textContent = 'SEED: (—, —)';
+    } else {
+      const txt = `(${state.seedX}, ${state.seedY})`;
+      seedDisp.textContent = 'Seed: ' + txt;
+      botRight.textContent = 'SEED: ' + txt;
+    }
+  }
+
+  bReset.addEventListener('click', () => {
+    if (!state.imgW) return;
+    state.seedX = Math.floor(state.imgW / 2);
+    state.seedY = Math.floor(state.imgH / 2);
+    updateSeedDisp();
+    redraw();
+  });
+
+  // ---------- Compute ----------
+  bCompute.addEventListener('click', () => {
+    if (!state.file) { setStatus('UPLOAD AN IMAGE FIRST', 'err'); return; }
+
+    const fd = new FormData();
+    fd.append('image', state.file);
+    fd.append('levels', sLevels.value);
+    fd.append('smooth', sSmooth.value);
+    fd.append('lum_mix', sLum.value);
+    fd.append('wt_range', sWt.value);
+    if (state.seedX != null) fd.append('seed_x', state.seedX);
+    if (state.seedY != null) fd.append('seed_y', state.seedY);
+
+    bCompute.disabled = true;
+    bCompute.textContent = 'COMPUTING...';
+    setStatus('COMPUTING CONTOURS...');
+
+    const t0 = performance.now();
+    fetch('/process', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(j => {
+        if (j.error) {
+          setStatus('ERR: ' + j.error, 'err');
+          return;
+        }
+        const dt = ((performance.now() - t0) / 1000).toFixed(2);
+        state.lastSvg = j.svg;
+        state.imgW = j.img_width;
+        state.imgH = j.img_height;
+        state.seedX = j.seed_x;
+        state.seedY = j.seed_y;
+        updateSeedDisp();
+        updateStats(j.stats);
+
+        const blob = new Blob([j.svg], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          renderedSvgImg = img;
+          redraw();
+          URL.revokeObjectURL(url);
+          setStatus(`OK · ${j.stats.paths} paths · ${dt}s`, 'ok');
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          setStatus('SVG RENDER FAILED', 'err');
+        };
+        img.src = url;
+      })
+      .catch(err => setStatus('ERR: ' + err.message, 'err'))
+      .finally(() => {
+        bCompute.disabled = false;
+        bCompute.textContent = 'COMPUTE';
+      });
+  });
+
+  function updateStats(s) {
+    statPaths.textContent = s.paths;
+    statPoints.textContent = s.total_points.toLocaleString();
+    statLevels.textContent = s.levels;
+    statSegs.textContent = s.total_points.toLocaleString();
+    statGrid.textContent = s.grid;
+    statTrng.textContent = `${s.t_min}…${s.t_max}`;
+    botLeft.textContent =
+      `LEVELS ${s.levels} | SEGS ${s.total_points.toLocaleString()} | CHAINS ${s.paths} | PTS ${s.total_points.toLocaleString()}`;
+  }
+
+  // ---------- Export ----------
+  // ---------- Filename helpers ----------
+  function slugifyTitle(filename) {
+    const base = (filename || 'Untitled').replace(/\.[^.]+$/, '');
+    const cleaned = base.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!cleaned) return 'Untitled';
+    return cleaned
+      .split('-')
+      .map(s => s ? s[0].toUpperCase() + s.slice(1).toLowerCase() : '')
+      .filter(Boolean)
+      .join('-');
+  }
+
+  function densityLabel(levels) {
+    const n = parseInt(levels, 10);
+    if (n <= 50) return 'Low-Density';
+    if (n <= 100) return 'Medium-Density';
+    return 'High-Density';
+  }
+
+  function nextFilename(ext) {
+    state.exportCount += 1;
+    const n = String(state.exportCount).padStart(3, '0');
+    return `${n}_${state.titleSlug}-${densityLabel(sLevels.value)}.${ext}`;
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  bSvg.addEventListener('click', () => {
+    if (!state.lastSvg) { setStatus('NOTHING TO EXPORT', 'err'); return; }
+    const blob = new Blob([state.lastSvg], { type: 'image/svg+xml' });
+    const fn = nextFilename('svg');
+    downloadBlob(blob, fn);
+    setStatus(`SVG → ${fn}`, 'ok');
+  });
+
+  bPng.addEventListener('click', () => {
+    if (!state.lastSvg) { setStatus('NOTHING TO EXPORT', 'err'); return; }
+    setStatus('RENDERING PNG...');
+    const blob = new Blob([state.lastSvg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = state.imgW;
+      c.height = state.imgH;
+      const cx = c.getContext('2d');
+      cx.fillStyle = '#fff';
+      cx.fillRect(0, 0, c.width, c.height);
+      cx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      c.toBlob((png) => {
+        if (!png) { setStatus('PNG ENCODE FAILED', 'err'); return; }
+        const fn = nextFilename('png');
+        downloadBlob(png, fn);
+        setStatus(`PNG → ${fn}`, 'ok');
+      }, 'image/png');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setStatus('PNG RENDER FAILED', 'err');
+    };
+    img.src = url;
+  });
+
+  bCopy.addEventListener('click', async () => {
+    if (!state.lastSvg) { setStatus('NOTHING TO COPY', 'err'); return; }
+    try {
+      await navigator.clipboard.writeText(state.lastSvg);
+      setStatus('SVG COPIED TO CLIPBOARD', 'ok');
+    } catch (e) {
+      setStatus('CLIPBOARD ERR: ' + e.message, 'err');
+    }
+  });
+
+  // ---------- Init ----------
+  fitCanvas();
+})();
+</script>
+</body>
+</html>

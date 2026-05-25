@@ -1,0 +1,40 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Notebook / editor noise
+.ipynb_checkpoints/
+.idea/
+.vscode/
+
+# Local generated outputs
+outputs/
+runs/
+contour_runs/
+*.svg
+*.png
+
+# Keep example source images unless explicitly moved
+!examples/
+!examples/*.jpeg
+!examples/*.jpg
+!examples/*.png

@@ -1,0 +1,83 @@
+
+═════════════════════════════════════════════════════════
+ RALPH LOOP · WAVEFRONT
+ duration=5400s  max_iters=200  token_budget=6000000
+ model=claude-sonnet-4-6  sleep=12s
+ started=2026-05-25 00:21:43  iter=2
+═════════════════════════════════════════════════════════
+
+[ralph] iter 002 — elapsed=0s cum_tok=0
+[ralph] iter 002 done · in=19 out=4827 cache_read=385162 · cum_in=19 cum_out=4827
+
+[ralph] iter 003 — elapsed=119s cum_tok=4846
+[ralph] iter 003 done · in=20 out=7945 cache_read=502581 · cum_in=39 cum_out=12772
+
+[ralph] iter 004 — elapsed=296s cum_tok=12811
+[ralph] iter 004 done · in=66 out=6973 cache_read=325786 · cum_in=105 cum_out=19745
+
+[ralph] iter 005 — elapsed=462s cum_tok=19850
+[ralph] iter 005 done · in=75 out=8886 cache_read=631946 · cum_in=180 cum_out=28631
+
+[ralph] iter 006 — elapsed=662s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_006.txt
+[ralph] iter 006 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 007 — elapsed=1034s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_007.txt
+[ralph] iter 007 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 008 — elapsed=1407s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_008.txt
+[ralph] iter 008 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 009 — elapsed=1779s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_009.txt
+[ralph] iter 009 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 010 — elapsed=2151s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_010.txt
+[ralph] iter 010 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 011 — elapsed=2524s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_011.txt
+[ralph] iter 011 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 012 — elapsed=2896s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_012.txt
+[ralph] iter 012 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 013 — elapsed=3268s cum_tok=28811
+[ralph] claude exited 143 — see loop/log/iter_013.txt
+[ralph] iter 013 done · in=0 out=0 cache_read=0 · cum_in=180 cum_out=28631
+
+[ralph] iter 014 — elapsed=3640s cum_tok=28811
+[ralph] iter 014 done · in=73 out=13016 cache_read=622450 · cum_in=253 cum_out=41647
+
+[ralph] iter 015 — elapsed=3919s cum_tok=41900
+[ralph] claude exited 143 — see loop/log/iter_015.txt
+[ralph] iter 015 done · in=0 out=0 cache_read=0 · cum_in=253 cum_out=41647
+
+[ralph] iter 016 — elapsed=4291s cum_tok=41900
+[ralph] claude exited 143 — see loop/log/iter_016.txt
+[ralph] iter 016 done · in=0 out=0 cache_read=0 · cum_in=253 cum_out=41647
+
+[ralph] iter 017 — elapsed=4663s cum_tok=41900
+[ralph] iter 017 done · in=56 out=14956 cache_read=646161 · cum_in=309 cum_out=56603
+
+[ralph] iter 018 — elapsed=4981s cum_tok=56912
+[ralph] claude exited 143 — see loop/log/iter_018.txt
+[ralph] iter 018 done · in=0 out=0 cache_read=0 · cum_in=309 cum_out=56603
+
+[ralph] iter 019 — elapsed=5354s cum_tok=56912
+[ralph] claude exited 143 — see loop/log/iter_019.txt
+[ralph] iter 019 done · in=0 out=0 cache_read=0 · cum_in=309 cum_out=56603
+[ralph] duration budget hit (5726s / 5400s).
+
+═════════════════════════════════════════════════════════
+ RALPH LOOP ENDED
+ finished=2026-05-25 01:57:09
+ iters_done=19
+ total_input_tokens=309
+ total_output_tokens=56603
+ total_cache_read_tokens=3114086
+═════════════════════════════════════════════════════════
