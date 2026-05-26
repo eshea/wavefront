@@ -1,7 +1,7 @@
 """
 Isoline extraction using scikit-image Marching Squares.
 
-Takes the scalar field and extracts N evenly-spaced contour levels.
+Takes the scalar field and extracts N power-spaced contour levels.
 Returns lists of polyline coordinate arrays.
 """
 
@@ -11,9 +11,9 @@ from skimage import measure
 
 def compute_thresholds(field_min, field_max, n_levels):
     """
-    Compute N quadratically-spaced threshold values across the field range.
+    Compute N power-spaced threshold values across the field range.
 
-    Uses quadratic (power=2) spacing to concentrate iso-levels near field_min
+    Uses power=2.7 spacing to concentrate iso-levels near field_min
     (face/center region) and spread them near field_max (background). This
     matches the reference behavior: dense rings in the face, sparse bands in
     the background. Linear spacing puts ~60% of levels in the background.
@@ -28,12 +28,12 @@ def compute_thresholds(field_min, field_max, n_levels):
     """
     field_range = field_max - field_min
     fracs = [i / (n_levels + 1) for i in range(1, n_levels + 1)]
-    return [field_min + f ** 2.5 * field_range for f in fracs]
+    return [field_min + f ** 2.7 * field_range for f in fracs]
 
 
 def extract_contours(field, n_levels, field_min=None, field_max=None):
     """
-    Extract contour polylines from scalar field at N evenly-spaced levels.
+    Extract contour polylines from scalar field at N power-spaced levels.
 
     Uses skimage.measure.find_contours which implements Marching Squares.
     Returns connected paths (skimage handles chaining internally).
@@ -76,6 +76,7 @@ def extract_contours(field, n_levels, field_min=None, field_max=None):
     stats = {
         'paths': len(all_contours),
         'total_points': total_points,
+        'segments': max(total_points - len(all_contours), 0),
         'levels': n_levels,
         't_min': round(fmin, 1),
         't_max': round(fmax, 1),
@@ -83,3 +84,32 @@ def extract_contours(field, n_levels, field_min=None, field_max=None):
     }
 
     return all_contours, stats
+
+
+def scale_contours(contours, from_size, to_size):
+    """
+    Scale contour coordinates from one image size to another.
+
+    Contour points are stored as [row, col] = [y, x]. Sizes are (width, height).
+    """
+    from_w, from_h = from_size
+    to_w, to_h = to_size
+    if from_w <= 0 or from_h <= 0:
+        raise ValueError('from_size dimensions must be positive')
+
+    scale_x = to_w / from_w
+    scale_y = to_h / from_h
+    if scale_x == 1 and scale_y == 1:
+        return contours
+
+    scaled = []
+    for contour in contours:
+        points = contour['points'].astype(np.float32, copy=True)
+        points[:, 0] *= scale_y
+        points[:, 1] *= scale_x
+        scaled.append({
+            **contour,
+            'points': points
+        })
+
+    return scaled

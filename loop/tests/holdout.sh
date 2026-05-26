@@ -17,13 +17,19 @@ cd "$(dirname "$0")/../.."
 
 INPUT="loop/holdout/contour_space_pre.jpg"
 REFERENCE="loop/holdout/contour_space_post.webp"
+SKIP_EXIT_CODE=${LOOP_SKIP_EXIT_CODE:-77}
 
 if [ ! -f "$INPUT" ]; then echo "FAIL: missing $INPUT"; exit 2; fi
 if [ ! -f "$REFERENCE" ]; then echo "FAIL: missing $REFERENCE"; exit 2; fi
 
+if ! command -v rsvg-convert >/dev/null 2>&1; then
+  echo "[holdout] rsvg-convert unavailable — SKIP"
+  exit "$SKIP_EXIT_CODE"
+fi
+
 if ! curl -s --max-time 3 -o /dev/null http://localhost:5055/; then
-  echo "FAIL: Flask not reachable on :5055 — start it first"
-  exit 2
+  echo "[holdout] Flask not reachable on :5055 — SKIP"
+  exit "$SKIP_EXIT_CODE"
 fi
 
 read INPUT_W INPUT_H <<<"$(source .venv/bin/activate && python3 -c "

@@ -6,18 +6,82 @@ Flask web application entry point.
 import io
 import os
 import base64
+import math
 import traceback
 
 from flask import Flask, render_template, request, jsonify
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from engine.field import load_and_preprocess, to_luminance, build_field
-from engine.contour import extract_contours
+from engine.contour import extract_contours, scale_contours
 from engine.smooth import smooth_contours
 from engine.export import contours_to_svg_string_fast
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max upload
+
+
+class RequestValidationError(ValueError):
+    """Raised for client-correctable form input errors."""
+
+
+def _parse_int_param(name, default, min_value, max_value):
+    raw = request.form.get(name)
+    if raw is None:
+        value = default
+    else:
+        raw = raw.strip()
+        if raw == '':
+            raise RequestValidationError(f'{name} must be an integer')
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise RequestValidationError(f'{name} must be an integer') from exc
+
+    return max(min_value, min(max_value, value))
+
+
+def _parse_float_param(name, default, min_value, max_value):
+    raw = request.form.get(name)
+    if raw is None:
+        value = default
+    else:
+        raw = raw.strip()
+        if raw == '':
+            raise RequestValidationError(f'{name} must be a number')
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise RequestValidationError(f'{name} must be a number') from exc
+        if not math.isfinite(value):
+            raise RequestValidationError(f'{name} must be a finite number')
+
+    return max(min_value, min(max_value, value))
+
+
+def _parse_optional_int_param(name):
+    raw = request.form.get(name)
+    if raw is None:
+        return None
+
+    raw = raw.strip()
+    if raw == '':
+        raise RequestValidationError(f'{name} must be an integer')
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RequestValidationError(f'{name} must be an integer') from exc
+
+
+def _required_image_file():
+    if 'image' not in request.files:
+        raise RequestValidationError('No image provided')
+
+    image_file = request.files['image']
+    if image_file.filename == '':
+        raise RequestValidationError('No image provided')
+
+    return image_file
 
 
 @app.route('/')
@@ -42,36 +106,30 @@ def process():
     Returns JSON:
         svg: string — complete SVG document
         stats: dict — paths, points, levels, t_min, t_max, grid
-        img_width: int
-        img_height: int
-        seed_x: int
-        seed_y: int
+        img_width/img_height: original uploaded image dimensions
+        processing_width/processing_height: capped dimensions used for computation
+        seed_x/seed_y: processing-grid seed coordinates
     """
     try:
-        levels = int(request.form.get('levels', 63))
-        smooth = float(request.form.get('smooth', 0.7))
-        lum_mix = float(request.form.get('lum_mix', 1.0))
-        wt_range = float(request.form.get('wt_range', 0.6))
-        seed_x = request.form.get('seed_x')
-        seed_y = request.form.get('seed_y')
+        image_file = _required_image_file()
+        levels = _parse_int_param('levels', 63, 10, 150)
+        smooth = _parse_float_param('smooth', 0.7, 0.0, 1.0)
+        lum_mix = _parse_float_param('lum_mix', 1.0, 0.0, 2.0)
+        wt_range = _parse_float_param('wt_range', 0.6, 0.0, 1.0)
+        seed_x = _parse_optional_int_param('seed_x')
+        seed_y = _parse_optional_int_param('seed_y')
 
-        levels = max(5, min(200, levels))
-        smooth = max(0.0, min(1.0, smooth))
-        lum_mix = max(0.0, min(3.0, lum_mix))
-        wt_range = max(0.0, min(1.0, wt_range))
+        try:
+            rgb_array, original_size, processed_size = load_and_preprocess(image_file)
+        except (UnidentifiedImageError, OSError) as exc:
+            raise RequestValidationError('Invalid or corrupt image data') from exc
 
-        if 'image' not in request.files:
-            return jsonify({'error': 'No image provided'}), 400
-
-        image_file = request.files['image']
-        if image_file.filename == '':
-            return jsonify({'error': 'Empty filename'}), 400
-
-        rgb_array, (img_w, img_h) = load_and_preprocess(image_file)
+        orig_w, orig_h = original_size
+        img_w, img_h = processed_size
         luminance = to_luminance(rgb_array)
 
-        sx = int(seed_x) if seed_x is not None else img_w // 2
-        sy = int(seed_y) if seed_y is not None else img_h // 2
+        sx = seed_x if seed_x is not None else img_w // 2
+        sy = seed_y if seed_y is not None else img_h // 2
         sx = max(0, min(img_w - 1, sx))
         sy = max(0, min(img_h - 1, sy))
 
@@ -81,20 +139,26 @@ def process():
 
         contours = smooth_contours(contours, smooth)
 
-        svg_string = contours_to_svg_string_fast(contours, img_w, img_h, wt_range)
-
         total_pts = sum(len(c['points']) for c in contours)
         stats['total_points'] = total_pts
+        stats['segments'] = max(total_pts - stats['paths'], 0)
+
+        export_contours = scale_contours(contours, processed_size, original_size)
+        svg_string = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range)
 
         return jsonify({
             'svg': svg_string,
             'stats': stats,
-            'img_width': img_w,
-            'img_height': img_h,
+            'img_width': orig_w,
+            'img_height': orig_h,
+            'processing_width': img_w,
+            'processing_height': img_h,
             'seed_x': sx,
             'seed_y': sy
         })
 
+    except RequestValidationError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -110,11 +174,11 @@ def thumbnail():
     Returns JSON: { data_url: 'data:image/jpeg;base64,...', width: N, height: N }
     """
     try:
-        if 'image' not in request.files:
-            return jsonify({'error': 'No image'}), 400
-
-        image_file = request.files['image']
-        rgb_array, (w, h) = load_and_preprocess(image_file, max_dim=640)
+        image_file = _required_image_file()
+        try:
+            rgb_array, _, (w, h) = load_and_preprocess(image_file, max_dim=640)
+        except (UnidentifiedImageError, OSError) as exc:
+            raise RequestValidationError('Invalid or corrupt image data') from exc
 
         img = Image.fromarray(rgb_array)
         buf = io.BytesIO()
@@ -126,12 +190,17 @@ def thumbnail():
 
         return jsonify({'data_url': data_url, 'width': w, 'height': h})
 
+    except RequestValidationError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5055))
+    host = os.environ.get('HOST', '127.0.0.1')
+    debug = os.environ.get('FLASK_DEBUG', '').lower() in {'1', 'true', 'yes', 'on'}
     print('\n  WAVEFRONT — Topographic Contour Engine')
-    print(f'  http://localhost:{port}\n')
-    app.run(debug=True, host='0.0.0.0', port=port)
+    print(f'  http://{host}:{port}\n')
+    app.run(debug=debug, host=host, port=port)

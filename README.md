@@ -7,13 +7,15 @@ A Python web application that transforms any image into topographic contour line
 
 WAVEFRONT treats image brightness as elevation. A scalar field is computed for every pixel:
 
-  field[x,y] = euclidean_distance(x, y, seed_x, seed_y) + (255 - luminance[x,y]) * lum_mix
+  field[x,y] = manhattan_distance(x, y, seed_x, seed_y)
+               + (255 - blurred_luminance[x,y]) * effective_lum_mix[x,y]
 
 This hybrid field combines:
-1. **Radial distance** from a user-defined seed point → creates concentric diamond/ring base pattern
-2. **Inverted luminance** → dark areas add elevation, distorting rings to follow image topology
+1. **Manhattan distance** from a user-defined seed point → creates concentric diamond/ring base patterns
+2. **Adaptive luminance blur** → preserves face detail near the seed and suppresses far-field texture
+3. **Distance-weighted inverted luminance** → dark areas add elevation, distorting rings to follow image topology
 
-Isolines (contour lines at equal field values) are then extracted using the Marching Squares algorithm via scikit-image, smoothed with Chaikin subdivision, and exported as SVG with adaptive stroke weights.
+Isolines are extracted with power-spaced thresholds using the Marching Squares algorithm via scikit-image, smoothed with Chaikin subdivision, scaled back to the original upload dimensions, and exported as SVG with adaptive stroke weights.
 
 ## Quick Start
 
@@ -24,6 +26,7 @@ Open http://localhost:5055 in your browser.
 
 > Default port is 5055 (avoids macOS AirPlay Receiver, which holds port 5000).
 > Override with `PORT=8080 python app.py`.
+> The development server binds to `127.0.0.1` by default. Override with `HOST=0.0.0.0` when needed.
 
 ## Usage
 
@@ -60,6 +63,7 @@ Export SVG is sized to original image dimensions in pixels (1px = 1 unit). For p
 - Python 3.9+
 - Flask — web server
 - NumPy — vectorized field computation
+- SciPy — adaptive Gaussian luminance blur
 - scikit-image — Marching Squares contour extraction
 - Pillow — image loading and preprocessing
 - svgwrite — SVG generation

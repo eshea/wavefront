@@ -13,14 +13,26 @@ cd "$(dirname "$0")/../.."
 
 REF=examples/contour_woman_post1.jpeg
 ANCHOR_BASENAME=iter_014.png
+ANCHOR_PATH="loop/output/${ANCHOR_BASENAME}"
 TOP_N=5
+SKIP_EXIT_CODE=${LOOP_SKIP_EXIT_CODE:-77}
 
 source .venv/bin/activate >/dev/null 2>&1
+
+if [ ! -f "$ANCHOR_PATH" ]; then
+  echo "[iter014_anchor] missing $ANCHOR_PATH — SKIP"
+  exit "$SKIP_EXIT_CODE"
+fi
+
+if ! compgen -G "loop/output/iter_*.png" >/dev/null; then
+  echo "[iter014_anchor] no loop/output/iter_*.png artifacts — SKIP"
+  exit "$SKIP_EXIT_CODE"
+fi
 
 # Sanity: judge endpoint must be reachable
 if ! curl -s --max-time 3 -o /dev/null "${WAVEFRONT_LLM:-http://192.168.50.135:8000}/health"; then
   echo "[iter014_anchor] judge LLM unreachable — SKIP"
-  exit 0
+  exit "$SKIP_EXIT_CODE"
 fi
 
 # Score every iter_*.png that exists
@@ -29,12 +41,15 @@ trap 'rm -f "$tmp"' EXIT
 for f in loop/output/iter_*.png; do
   [ -f "$f" ] || continue
   n=$(basename "$f" .png | sed 's/iter_//; s/^0*//')
-  python loop/judge.py --output "$f" --reference "$REF" --iter "$n" 2>/dev/null >> "$tmp"
+  if ! python loop/judge.py --output "$f" --reference "$REF" --iter "$n" 2>/dev/null >> "$tmp"; then
+    echo "[iter014_anchor] judge failed for $f  FAIL"
+    exit 1
+  fi
 done
 
 if [ ! -s "$tmp" ]; then
   echo "[iter014_anchor] no iter outputs scored — SKIP"
-  exit 0
+  exit "$SKIP_EXIT_CODE"
 fi
 
 ranked=$(python3 -c "

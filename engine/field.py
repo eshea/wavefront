@@ -1,8 +1,9 @@
 """
 Scalar field construction for WAVEFRONT.
 
-The core insight: treat image brightness as elevation warping a radial distance field.
-field[x,y] = euclidean_distance(x,y, seed_x,seed_y) + (255 - luminance[x,y]) * lum_mix
+The core insight: treat image brightness as elevation warping a
+Manhattan-distance field. Luminance is adaptively blurred by distance from
+the seed so face detail stays legible while far-field texture is suppressed.
 """
 
 import numpy as np
@@ -15,7 +16,7 @@ MAX_DIM = 640  # Maximum dimension for processing grid
 
 def load_and_preprocess(image_file, max_dim=MAX_DIM):
     """
-    Load image from file object, resize preserving aspect ratio, return RGB numpy array.
+    Load image from file object and resize for processing while preserving aspect ratio.
 
     Args:
         image_file: file-like object (from Flask request.files)
@@ -23,10 +24,12 @@ def load_and_preprocess(image_file, max_dim=MAX_DIM):
 
     Returns:
         rgb_array: numpy array shape (H, W, 3), dtype uint8
-        (width, height): tuple of final dimensions
+        original_size: (width, height) tuple from the uploaded image
+        processed_size: (width, height) tuple used for field computation
     """
     img = Image.open(image_file).convert('RGB')
-    w, h = img.size
+    original_size = img.size
+    w, h = original_size
 
     if max(w, h) > max_dim:
         if w >= h:
@@ -37,7 +40,7 @@ def load_and_preprocess(image_file, max_dim=MAX_DIM):
             new_w = int(w * max_dim / h)
         img = img.resize((new_w, new_h), Image.LANCZOS)
 
-    return np.array(img), img.size
+    return np.array(img), original_size, img.size
 
 
 def to_luminance(rgb_array):
@@ -57,12 +60,15 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
     """
     Build the scalar field used for isoline extraction.
 
-    field[y,x] = sqrt((x - seed_x)² + (y - seed_y)²) + (255 - luminance[y,x]) * lum_mix
+    field[y,x] = abs(x - seed_x) + abs(y - seed_y)
+                 + (255 - blurred_luminance[y,x]) * effective_lum_mix[y,x]
 
-    The distance term creates concentric rings from the seed point.
-    The luminance term distorts those rings to follow image topology:
+    The Manhattan distance term creates concentric diamond rings from the
+    seed point. The luminance term distorts those rings to follow image topology:
     - Dark areas (lum→0): contribute up to 255*lum_mix → tight rings
     - Bright areas (lum→255): contribute 0 → smooth parallel bands
+    - Far from the seed, the luminance map is more heavily blurred and mixed
+      with lower strength so background texture does not collapse into loops.
 
     Args:
         luminance: float32 array (H, W), values 0–255
@@ -81,7 +87,7 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
     # facial feature wrapping detail); pixels far from seed (hair, background) get heavy
     # blur (σ=30, suppresses texture noise so iso-levels become open flowing bands).
     # Brightness-based blending fails because hair/plants are also dark (same as face).
-    lum_light = gaussian_filter(luminance, sigma=16)
+    lum_light = gaussian_filter(luminance, sigma=8)
     lum_heavy = gaussian_filter(luminance, sigma=30)
     xs = np.arange(W, dtype=np.float32)
     ys = np.arange(H, dtype=np.float32)
