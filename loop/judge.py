@@ -52,7 +52,7 @@ import urllib.request
 from PIL import Image
 
 
-LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://192.168.50.135:8000")
+LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://neuromancer:8000")
 LLM_MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
 MAX_SIDE = 512
 
@@ -63,6 +63,7 @@ MAX_SIDE = 512
 # (comma-separated). NOTE: backends score on DIFFERENT scales — every record
 # stamps judge_backend, and guard_tick.sh keys its thresholds off it.
 KNOWN_BACKENDS = [
+    "http://neuromancer:8000",      # vLLM Qwen3.5-122B (INT4, vision) — primary
     "http://192.168.50.135:8000",   # vLLM Qwen3
     "http://192.168.50.135:5002",   # llama.cpp Qwen3.5-abliterated
 ]
@@ -115,7 +116,8 @@ REPO = Path(__file__).resolve().parent.parent
 DEFAULT_REF = REPO / "examples" / "contour_woman_lineart.png"  # clean line-art
 # (cropped from the CONTOUR-V CORE screenshot — same woman, clean diamond geometry,
 #  a sharper target than the ink-on-photo contour_woman_post1.jpeg)
-ANCHOR_HIGH = REPO / "loop" / "output" / "iter_014.png"  # humans rate 95
+ANCHOR_HIGH = REPO / "examples" / "contour_woman_post1.jpeg"  # the ARTIST's real
+# plotted output — the ground-truth "good" (was a synthetic WAVEFRONT render).
 ANCHOR_LOW_DESC = (
     "ANCHOR_15 (not shown): a previous candidate that was nearly blank "
     "with sparse Lissajous-like noise, no face visible — humans rated 15."
@@ -242,9 +244,10 @@ def main() -> int:
     content += labeled("CANDIDATE — score this:", args.output)
 
     n = max(1, args.samples)
-    # Single sample stays deterministic (temp 0) for backward compat; with
-    # multiple samples we need genuine variation to de-noise, so draw warm.
-    temperature = 0.0 if n == 1 else 0.5
+    # Single sample stays deterministic (temp 0); multi-sample draws warm to
+    # de-noise — but not TOO warm (Qwen3.5 swings wildly at 0.5, giving 15..96
+    # on the same image). 0.25 keeps genuine variation without the chaos.
+    temperature = 0.0 if n == 1 else float(os.environ.get("WAVEFRONT_JUDGE_TEMP", 0.25))
 
     # Pick a live backend once, up front, and use it for every sample (never
     # switch mid-scoring — that would mix scales within one judge_score).
