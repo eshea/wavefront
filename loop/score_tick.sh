@@ -42,7 +42,7 @@ import json, sys
 pixel = json.loads('''$pixel_line''') if '''$pixel_line'''.strip() else {}
 judge = json.loads('''$judge_line''') if '''$judge_line'''.strip() else {}
 merged = {**pixel}
-for k in ('judge_score', 'judge_notes', 'judge_spread', 'judge_samples', 'elapsed_s'):
+for k in ('judge_score', 'judge_notes', 'judge_spread', 'judge_samples', 'model', 'judge_backend', 'elapsed_s'):
     if k in judge:
         merged[k] = judge[k]
 print(json.dumps(merged))

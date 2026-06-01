@@ -24,6 +24,10 @@
 # Usage:   ./loop/guard_tick.sh <iter_number>
 # Env:     GUARD_FLOOR(60) GUARD_DROP(20) GUARD_INK_HI(0.92) GUARD_INK_LO(0.03)
 #          GUARD_DISABLE(unset) GUARD_NO_COMMIT(unset)
+# NOTE: GUARD_FLOOR is on the JUDGE'S scale, which is backend-specific. 60 suits
+# the vLLM-Qwen3 judge (good ~85); the llama.cpp-Qwen3.5-abl judge rates good
+# renders ~40, so with that backend set e.g. GUARD_FLOOR=25 or it reverts every
+# tick. The relative-regression gate (GUARD_DROP vs recent best) is scale-robust.
 set -u
 cd "$(dirname "$0")/.."
 

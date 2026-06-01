@@ -74,7 +74,7 @@ rec = json.loads(sys.stdin.read())
 rec['holdout'] = True
 rec['ts_run'] = os.environ['TS']
 judge = json.loads(os.environ['JUDGE']) if os.environ.get('JUDGE','').strip() else {}
-for k in ('judge_score', 'judge_notes', 'judge_spread', 'judge_samples'):
+for k in ('judge_score', 'judge_notes', 'judge_spread', 'judge_samples', 'model', 'judge_backend'):
     if k in judge:
         rec[k] = judge[k]
 print(json.dumps(rec))

@@ -19,8 +19,22 @@ Emits one JSON line:
     {"output":..., "judge_score": 0..100, "judge_notes":...,
      "vs_anchor_high":..., "model":..., "elapsed_s":...}
 
+Backend (OpenAI-compatible /v1/chat/completions):
+    WAVEFRONT_LLM        base URL (default http://192.168.50.135:8000, the vLLM
+                         Qwen3 box). To use the llama.cpp Qwen3.5-abliterated
+                         vision server instead, just set
+                             WAVEFRONT_LLM=http://192.168.50.135:5002
+                         llama.cpp ignores the model field, so WAVEFRONT_LLM_MODEL
+                         can stay default. The vLLM-only `chat_template_kwargs`
+                         param we send is harmlessly ignored by llama.cpp.
+    ⚠ SCALE WARNING: different backends do NOT score on the same scale (a good
+      render is ~85 on vLLM-Qwen3 but ~40 on llama.cpp-Qwen3.5-abl). Every record
+      carries `judge_backend` so scales aren't silently mixed — don't compare
+      scores across backends, and re-tune GUARD_FLOOR (loop/guard_tick.sh) to the
+      active judge or it will revert every tick.
+
 CLI:
-    python loop/judge.py --output PATH [--reference PATH] [--iter N]
+    python loop/judge.py --output PATH [--reference PATH] [--iter N] [--samples N]
 """
 
 import argparse
@@ -193,8 +207,8 @@ def main() -> int:
         print(json.dumps({
             "iter": args.iter, "output": str(args.output),
             "judge_score": -1, "judge_notes": f"all {n} call(s) failed: {last_err}",
-            "vs_anchor_high": "?", "model": LLM_MODEL, "samples": n,
-            "elapsed_s": elapsed,
+            "vs_anchor_high": "?", "model": LLM_MODEL, "judge_backend": LLM_BASE,
+            "samples": n, "elapsed_s": elapsed,
         }))
         return 1
 
@@ -213,6 +227,9 @@ def main() -> int:
         "judge_spread": max(scores) - min(scores),  # 0 == fully agreed
         "samples": len(samples),             # successful draws
         "model": LLM_MODEL,
+        "judge_backend": LLM_BASE,           # which server scored this — scores
+                                             # from different backends are NOT on
+                                             # the same scale; don't compare them
         "elapsed_s": elapsed,
     }
     print(json.dumps(rec))
