@@ -2,20 +2,25 @@
 """
 loop/judge.py — visual judge using a local vision LLM.
 
-Posts a reference image and a candidate output image to the local vLLM
-server (Qwen3 122B at 192.168.50.135:8000) and asks it to rate how well
-the output matches the reference's style as a contour-line portrait.
+Scores a candidate WAVEFRONT output by comparing it to ONE reference
+plus ONE calibration anchor per call. Uses 3 images per request (well
+within what the local vLLM tolerates — 6 crashes it).
 
-Emits one JSON line to stdout:
-    {"output": "...", "reference": "...", "judge_score": 0..100,
-     "judge_notes": "...", "model": "qwen", "elapsed_s": 12.3}
+To exploit multi-reference scoring without overloading the server,
+multiple calls can be chained (e.g. against post1, post2, post4) and
+the max score taken. By default, one call is made against post1.jpeg
+(the medium-density reference that matches our test settings).
+
+Calibration anchors are baked into the prompt with explicit
+human-rated scores so the judge is forced to place the candidate
+on the same scale as known outputs.
+
+Emits one JSON line:
+    {"output":..., "judge_score": 0..100, "judge_notes":...,
+     "vs_anchor_high":..., "model":..., "elapsed_s":...}
 
 CLI:
-    python loop/judge.py --output PATH --reference PATH [--iter N]
-
-The judge prompt scores three axes (recognizability, line style,
-overall composition) and returns one composite 0–100 number plus a
-short note. Temperature=0 for run-to-run consistency.
+    python loop/judge.py --output PATH [--reference PATH] [--iter N]
 """
 
 import argparse
@@ -34,31 +39,46 @@ from PIL import Image
 
 LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://192.168.50.135:8000")
 LLM_MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
-MAX_SIDE = 512  # downscale images before sending — keeps prompt cheap
+MAX_SIDE = 512
+
+REPO = Path(__file__).resolve().parent.parent
+DEFAULT_REF = REPO / "examples" / "contour_woman_post1.jpeg"
+ANCHOR_HIGH = REPO / "loop" / "output" / "iter_014.png"  # humans rate 95
+ANCHOR_LOW_DESC = (
+    "ANCHOR_15 (not shown): a previous candidate that was nearly blank "
+    "with sparse Lissajous-like noise, no face visible — humans rated 15."
+)
 
 
 PROMPT = """You are evaluating WAVEFRONT, a topographic-contour portrait engine.
 
-You see two images:
-  1. REFERENCE — the artist's known-good plotted output (photo of paper with ink)
-  2. CANDIDATE — the engine's rendered output
+You will see THREE images:
+  1. REFERENCE — the artist's valid plotted output (photo of paper with ink). Different density variants are all valid; ignore color/paper.
+  2. ANCHOR_95 — a previous engine output humans rated 95/100. This is what "good" looks like as a digital render.
+  3. CANDIDATE — the engine output you are scoring.
 
-Rate the CANDIDATE on a scale 0–100 for how well it matches the REFERENCE's STYLE as a contour-line portrait of the same subject. Be generous about color and texture differences (reference is photographed orange ink on paper; candidate is black-on-white digital). Focus on:
+Calibrate your 0–100 score to these reference points:
+  - ANCHOR_95 means: clear contour-line portrait, concentric diamond/ring
+    structure clearly emanating from a center point, eyes/nose/mouth
+    visible as ridges in the contour pattern, no smudging.
+  - ANCHOR_15 (not shown but for scale): nearly blank, abstract noise,
+    no recognizable face, no diamond rings — score around 15.
+  - REFERENCE represents the gold-standard style on paper.
 
-- Is the CANDIDATE recognizably a contour-line portrait of a face? (most important)
-- Does it have concentric diamond/ring structure emanating from a center?
-- Does line density / density distribution roughly match the reference?
-- Are facial features (eyes, nose, mouth) discernible in the contour pattern?
+CRITICAL FAILURE MODES — cap at ≤50 regardless of other features:
+  - face appears as a dark SMUDGY BLOB instead of distinct lines
+  - over-dense central area OBSCURES facial features
+  - solid black regions where there should be linework
+  - the diamond/ring structure is missing or buried
 
-Scoring guide:
-  0–20  = blank, crashed, abstract noise, or unrecognizable as a portrait
-  21–40 = some contour structure but face is not discernible
-  41–60 = face shape visible but density/style is off
-  61–80 = clear portrait, ring structure present, reasonable match
-  81–100 = strong match — face clear, rings present, density similar to reference
+Sweet spots — earn ≥85 only if:
+  - CANDIDATE matches or exceeds ANCHOR_95's clarity
+  - clean linework, no smudging
+  - diamond/ring structure clearly emanates from a center point
+  - eyes, nose, mouth visible as ridges
 
-Reply with ONLY a JSON object on a single line, no other text:
-{"score": <int 0-100>, "notes": "<one short sentence>"}"""
+Reply with ONLY one JSON object on a single line:
+{"score": <int 0-100>, "notes": "<one short sentence>", "vs_95": "<better|same|worse>"}"""
 
 
 def img_to_data_url(path: Path, max_side: int = MAX_SIDE) -> str:
@@ -71,28 +91,22 @@ def img_to_data_url(path: Path, max_side: int = MAX_SIDE) -> str:
             img = img.resize((int(w * max_side / h), max_side), Image.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85)
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return f"data:image/jpeg;base64,{b64}"
+    return f"data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode()}"
 
 
-def call_llm(ref_url: str, cand_url: str, *, timeout: int = 120) -> dict:
+def labeled(text: str, path: Path) -> list[dict]:
+    return [
+        {"type": "text", "text": text},
+        {"type": "image_url", "image_url": {"url": img_to_data_url(path)}},
+    ]
+
+
+def call_llm(content: list[dict], timeout: int = 180) -> dict:
     payload = {
         "model": LLM_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": PROMPT},
-                    {"type": "text", "text": "REFERENCE:"},
-                    {"type": "image_url", "image_url": {"url": ref_url}},
-                    {"type": "text", "text": "CANDIDATE:"},
-                    {"type": "image_url", "image_url": {"url": cand_url}},
-                ],
-            }
-        ],
-        "max_tokens": 600,
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": 400,
         "temperature": 0,
-        # Try to suppress Qwen3's thinking mode so we get content not reasoning.
         "chat_template_kwargs": {"enable_thinking": False},
     }
     req = urllib.request.Request(
@@ -104,69 +118,70 @@ def call_llm(ref_url: str, cand_url: str, *, timeout: int = 120) -> dict:
         return json.loads(resp.read())
 
 
-def parse_score(reply: dict) -> tuple[int, str]:
-    """Extract score+notes from the model's reply. Falls back to regex if
-    the model returned reasoning instead of clean JSON."""
+def parse(reply: dict) -> dict:
     msg = reply["choices"][0]["message"]
     text = msg.get("content") or msg.get("reasoning") or ""
-
-    # Direct JSON object first
+    result = {"score": -1, "notes": "", "vs_95": "?"}
     for blob in re.findall(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL):
         try:
             d = json.loads(blob)
-            score = int(d.get("score", -1))
-            notes = str(d.get("notes", "")).strip()
-            if 0 <= score <= 100:
-                return score, notes
+            s = int(d.get("score", -1))
+            if 0 <= s <= 100:
+                result["score"] = s
+                result["notes"] = str(d.get("notes", "")).strip()
+                result["vs_95"] = str(d.get("vs_95", "?")).strip()
+                return result
         except (json.JSONDecodeError, ValueError):
             continue
-
-    # Fallback: find any number 0..100 near "score" keyword
     m = re.search(r"score[^0-9-]{0,12}([0-9]{1,3})", text, re.IGNORECASE)
     if m:
         n = int(m.group(1))
         if 0 <= n <= 100:
-            return n, (text[:120].strip() or "(score parsed without JSON)")
-
-    return -1, f"(parse-failed) {text[:200]}"
+            result["score"] = n
+            result["notes"] = f"(score parsed without JSON) {text[:120].strip()}"
+    return result
 
 
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--output", required=True, type=Path)
-    p.add_argument("--reference", required=True, type=Path)
+    p.add_argument("--reference", type=Path, default=DEFAULT_REF)
     p.add_argument("--iter", type=int, default=None)
     args = p.parse_args()
 
-    if not args.output.exists():
-        sys.stderr.write(f"judge.py: missing {args.output}\n"); return 2
-    if not args.reference.exists():
-        sys.stderr.write(f"judge.py: missing {args.reference}\n"); return 2
+    for path, name in [(args.output, "output"),
+                       (args.reference, "reference"),
+                       (ANCHOR_HIGH, "anchor_high")]:
+        if not path.exists():
+            sys.stderr.write(f"judge.py: missing {name} {path}\n"); return 2
 
-    ref_url = img_to_data_url(args.reference)
-    cand_url = img_to_data_url(args.output)
+    content: list[dict] = [{"type": "text", "text": PROMPT}]
+    content += labeled("REFERENCE:", args.reference)
+    content += labeled("ANCHOR_95 (humans rated 95):", ANCHOR_HIGH)
+    content += labeled("CANDIDATE — score this:", args.output)
 
     t0 = time.monotonic()
     try:
-        reply = call_llm(ref_url, cand_url)
+        reply = call_llm(content)
     except Exception as e:
         sys.stderr.write(f"judge.py: LLM call failed: {e}\n")
         print(json.dumps({
-            "output": str(args.output), "reference": str(args.reference),
+            "iter": args.iter, "output": str(args.output),
             "judge_score": -1, "judge_notes": f"call-failed: {e}",
-            "model": LLM_MODEL, "elapsed_s": round(time.monotonic() - t0, 1),
+            "vs_anchor_high": "?", "model": LLM_MODEL,
+            "elapsed_s": round(time.monotonic() - t0, 1),
         }))
         return 1
 
-    score, notes = parse_score(reply)
+    parsed = parse(reply)
     elapsed = round(time.monotonic() - t0, 1)
-
     rec = {
         "iter": args.iter,
         "output": str(args.output),
         "reference": str(args.reference),
-        "judge_score": score,
-        "judge_notes": notes,
+        "judge_score": parsed["score"],
+        "judge_notes": parsed["notes"],
+        "vs_anchor_high": parsed["vs_95"],
         "model": LLM_MODEL,
         "elapsed_s": elapsed,
     }

@@ -38,3 +38,14 @@ contour_runs/
 !examples/*.jpeg
 !examples/*.jpg
 !examples/*.png
+
+# Ralph loop runtime artifacts (per-tick dumps, pidfiles, generated outputs)
+loop/*.pid
+loop/log/
+loop/output/*
+loop/holdout/output_*
+
+# ...but force-track the judge calibration anchor: it's a runtime dependency
+# (loop/judge.py loads it as ANCHOR_95), not a regenerable output. The parent
+# dir is matched by a glob (not a dir-ignore) so this negation can take effect.
+!loop/output/iter_014.png

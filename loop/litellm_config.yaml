@@ -1,0 +1,31 @@
+# litellm proxy config — routes claude-code requests to local Qwen.
+#
+# claude-code asks for "claude-sonnet-4-6" (or claude-opus-4-7);
+# litellm matches by model_name and forwards to vLLM serving Qwen3 122B
+# at 192.168.50.135:8000 in OpenAI-compatible format.
+
+model_list:
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: openai/qwen
+      api_base: http://192.168.50.135:8000/v1
+      api_key: dummy
+
+  - model_name: claude-opus-4-7
+    litellm_params:
+      model: openai/qwen
+      api_base: http://192.168.50.135:8000/v1
+      api_key: dummy
+
+  # Catch-all wildcard so any Claude model name routes to Qwen.
+  # Useful if claude-code resolves to a fully-qualified id like
+  # "claude-sonnet-4-6-20251020" etc.
+  - model_name: "claude*"
+    litellm_params:
+      model: openai/qwen
+      api_base: http://192.168.50.135:8000/v1
+      api_key: dummy
+
+litellm_settings:
+  drop_params: true        # silently drop Anthropic-only params Qwen can't handle
+  set_verbose: false

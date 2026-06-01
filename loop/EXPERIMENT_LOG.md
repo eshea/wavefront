@@ -589,3 +589,85 @@ power=2.0 was implemented in contour.py per iter_032 "next". lum_light sigma was
 **Result:** better — clear improvement vs. all prior iterations. vs. reference: closest match yet on face ring visibility; small gap remains on inner ring spacing.
 
 **Next:** build — try face_factor 0.5 → 0.35 to further reduce inner-face gradient steepness and widen ring spacing near seed. Power stays at 2.7. Hypothesis: inner rings will spread to ~6-8px spacing, matching reference's well-separated inner rings.
+
+---
+
+## Iter 044 · 2026-05-25 12:10 · Three-way probe (all REVERTED) — chaos diagnosis
+
+**Hypothesis:** Tried three separate hypotheses to address iter_28's judge complaint of "significantly higher and more chaotic than reference": (A) face_factor 0.5→0.35 to widen ring spacing, (B) sigma_light 16→24 to reduce texture noise, (C) min_path_length 30→80 to eliminate small loops.
+
+**Changes attempted (all reverted):**
+- A: `engine/field.py:101` — face_factor 0.5→0.35 → REVERTED
+- B: `engine/field.py:84` — sigma_light 16→24 → REVERTED
+- C: `engine/contour.py:66` — min_path_length 30→80 → REVERTED
+- Final state: identical to iter_28 baseline (face_factor=0.5, sigma_light=16, min_path_length=30, power=2.7, field_sigma=1.0)
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_029.svg` (paths=178, pts=97,006, t_min=99.0, t_max=859.4)
+- reference: `examples/contour_woman_post1.jpeg`
+- visual comparison:
+  - **iter_28 (baseline, judge=75)**: Recognizable portrait of the woman — face clearly visible with eye sockets, nose, chin in contour topology. Lines denser and more chaotic than reference (many small irregular loops in face zone mixed with large topology rings). Background sparse and clean.
+  - **A (face_factor=0.35)**: Complete failure — judge=15, "abstract geometric pattern." Face lum contribution so low the field was essentially radial; no facial topology at all. t_min dropped to 73.0, paths=152.
+  - **B (sigma_light=24)**: judge=15 again — too much blur eliminated facial feature detail (eye sockets, nose are ~50-100px features that sigma=24 smooths away). paths=153.
+  - **C (min_path_length=80)**: judge=15 — filtering out paths of 30-79 points removes the facial sub-feature rings (eye socket closed loops are short-perimeter paths), leaving only large rings that look like an abstract bullseye.
+  - **Key diagnostic**: All three approaches to reduce chaos also eliminated the face. The face and chaos are tightly coupled because both arise from the luminance signal — you cannot reduce one without the other using simple blunt cuts.
+
+**Score:** judge=75 ssim=0.0469 edge_iou=0.1218 path_fit=None
+            · vs last 3 avg: judge Δ0 (no improvement)
+
+**Result:** same — all changes reverted. Code is clean at iter_28 baseline.
+vs. reference: same gap as iter_28 (chaotic face zone, 178 vs 452 paths)
+vs. iter_014 (anchor 95): 20 points below
+
+**Next:** build — increase field_sigma from 1.0 to 3.0 in `engine/field.py:108`. Hypothesis: field_sigma=1.0 smooths out 1px gradient spikes but leaves 2-3px irregularities that create small closed loops. sigma=3.0 smooths those without affecting the large-scale face topology (which has gradients spanning 50-200px). This targets "chaos" without touching the luminance contribution that creates facial features.
+
+---
+
+## Iter 045 · 2026-05-25 14:45 · Restore power=2.7 spacing + σ=16→σ=8 face blur (combined)
+
+**Hypothesis:** Two regressions identified: (1) contour.py was changed from `f**2.5` (baseline) to linear `f * field_range`, eliminating the power spacing that concentrates iso-levels in the face zone; (2) field.py σ=16 face blur was too smooth vs σ=8 which was used in the excellent iter_027 output. Combining power=2.7 restoration with σ=8 face blur should recover and exceed baseline quality.
+
+**Change:**
+- `engine/contour.py:31` — restored `f * field_range` (linear/regressed) → `f ** 2.7 * field_range` (power spacing)
+- `engine/field.py:84` — changed `sigma=16` → `sigma=8` for face zone blur
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_034.svg` (paths=230, pts=107,457, t_min=116.5, t_max=905.9)
+- reference: `examples/contour_woman_post1.jpeg`
+- visual comparison:
+  - **iter_034 (this tick)**: Clear facial silhouette with recognizable eyes/nose/features. Background shows organic flowing bands with reasonable white space — much improved over iter_033's heavy center. Face is visible but center still slightly dark compared to reference. Diamond ring structure present.
+  - **iter_033 (prior, power=2.7 only, σ=16)**: Better than iter_038 but face still a dark mass; background organic.
+  - **Reference**: Thin individual diamond rings clearly separated, crisp face detail, sparse background.
+  - **Judge note**: "clear contour-line portrait with characteristic concentric diamond/ring structure and recognizable facial features, matching the reference style" — no density complaint this tick.
+
+**Score:** judge=85 ssim=0.0667 edge_iou=0.1136 path_fit=None
+            · vs last 3 avg (75): judge +10
+
+**Result:** better — significant improvement from 75→85. vs. reference: closer.
+vs. iter_014 (anchor 95): 10 points below.
+
+**Next:** build — try power=2.5 (baseline commit value) instead of 2.7, keeping σ=8. With σ=8 face blur creating crisper gradients, power=2.7 may over-concentrate levels in the face zone making it too dense. Power=2.5 was the historically validated value when face detail was best (iter_014 area). Hypothesis: power=2.5 + σ=8 reduces face center density while preserving the organic background topology we now have.
+
+---
+
+## Iter 046 · 2026-05-25 14:15 · Try power=2.5 (baseline) instead of 2.7 — REVERTED
+
+**Hypothesis:** Power=2.5 (committed baseline) + sigma=8 reduces face density vs power=2.7. Historically 2.5 was the baseline when iter_014 scored 95.
+
+**Change:**
+- `engine/contour.py:31` — changed `f ** 2.7` → `f ** 2.5`
+- `engine/field.py:84` — sigma=8 unchanged (from iter_034)
+
+**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00, lum_mix 1.0, wt_range 0.0)
+- output: `loop/output/iter_035.svg` (paths=232, pts=111,033, t_min=116.5, t_max=905.9)
+- reference: `examples/contour_woman_post1.jpeg`
+- visual comparison: Face visible with flowing bands, but judge saw "dark, smudgy blob where facial features are completely obscured by over-dense linework". Power=2.5 concentrates more iso-levels at lower field values (face zone), creating over-dense linework despite visual similarity to iter_034.
+
+**Score:** judge=15 ssim=0.0599 edge_iou=0.1137 path_fit=None
+            · vs last 3 avg (81.7): judge -66.7
+
+**Result:** WORSE — catastrophic regression 85→15. **REVERTED** engine/contour.py back to `f ** 2.7`.
+
+**Analysis:** The key insight is that iter_014 scored 95 but did NOT use power=2.5 + sigma=8. It used sigma=16 (the committed baseline). The sigma=8 change (which helps in general) interacts badly with power=2.5 because: sigma=8 creates sharper local luminance gradients, which means more iso-levels cross through the same spatial area in the face zone. When combined with power=2.5's already aggressive face-zone concentration, the face becomes overly dense. Power=2.7 with sigma=8 is a better balance.
+
+**Next:** build — instead of changing power, try adjusting the field's weight_range parameter. The `wt_range=0.0` param controls how much distance weighting is mixed into the field. Try `wt_range=0.1` which would slightly spread iso-levels away from seed toward background — potentially opening up the face center while keeping background organic. Hypothesis: small positive wt_range with power=2.7 + sigma=8 is the missing ingredient to reach 90+.
