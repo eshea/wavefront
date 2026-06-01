@@ -56,19 +56,29 @@ def to_luminance(rgb_array):
     return 0.299 * r + 0.587 * g + 0.114 * b
 
 
+# --- Uniform field preprocessing knobs (the ralph loop edits these). These
+# replace the old adaptive-blur "ring" that imposed an artificial circular zone
+# at ~20-35% radius — an artifact NOT present in the reverse-engineered tool,
+# whose field is a flat `dist + (255-lum)*k` applied UNIFORMLY across the image. ---
+FIELD_DENOISE_SIGMA = 10.0   # uniform blur — suppresses busy input texture evenly
+FIELD_SHADOW_LIFT = 60.0     # raise dark pixels toward this floor so heavy shadows /
+                             # makeup don't pile contours into a blob (0 = off)
+
+
 def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
     """
-    Build the scalar field used for isoline extraction.
+    Build the scalar field used for isoline extraction — the reverse-engineered
+    CONTOUR-V formula, applied UNIFORMLY (no adaptive zones):
 
-    field[y,x] = abs(x - seed_x) + abs(y - seed_y)
-                 + (255 - blurred_luminance[y,x]) * effective_lum_mix[y,x]
+        field[y,x] = abs(x - seed_x) + abs(y - seed_y)      # Manhattan -> diamonds
+                     + (255 - lum_pre[y,x]) * lum_mix
 
-    The Manhattan distance term creates concentric diamond rings from the
-    seed point. The luminance term distorts those rings to follow image topology:
-    - Dark areas (lum→0): contribute up to 255*lum_mix → tight rings
-    - Bright areas (lum→255): contribute 0 → smooth parallel bands
-    - Far from the seed, the luminance map is more heavily blurred and mixed
-      with lower strength so background texture does not collapse into loops.
+    where lum_pre is the luminance after uniform preprocessing: a single Gaussian
+    denoise (FIELD_DENOISE_SIGMA) that tames the busy source texture, then a
+    shadow-lift (FIELD_SHADOW_LIFT) that compresses the dark end so heavy
+    shadows/makeup don't collapse contours into a smudge. The diamond rings
+    emanate from the seed and the luminance term warps them to follow the face,
+    consistently from the seed all the way to the image edges.
 
     Args:
         luminance: float32 array (H, W), values 0–255
@@ -83,33 +93,18 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
     """
     H, W = luminance.shape
 
-    # Adaptive blur: pixels near the seed point (face) get light blur (σ=8, preserves
-    # facial feature wrapping detail); pixels far from seed (hair, background) get heavy
-    # blur (σ=30, suppresses texture noise so iso-levels become open flowing bands).
-    # Brightness-based blending fails because hair/plants are also dark (same as face).
-    lum_light = gaussian_filter(luminance, sigma=8)
-    lum_heavy = gaussian_filter(luminance, sigma=30)
+    # Uniform preprocessing (same everywhere — this is the key fix vs. the old ring).
+    lum_pre = gaussian_filter(luminance, sigma=FIELD_DENOISE_SIGMA)
+    if FIELD_SHADOW_LIFT > 0:
+        lum_pre = FIELD_SHADOW_LIFT + lum_pre * ((255.0 - FIELD_SHADOW_LIFT) / 255.0)
+
     xs = np.arange(W, dtype=np.float32)
     ys = np.arange(H, dtype=np.float32)
     xx, yy = np.meshgrid(xs, ys)
-    dist_to_seed = np.sqrt((xx - seed_x) ** 2 + (yy - seed_y) ** 2)
-    # Sharp spatial transition: face zone (within inner_r) gets σ=12, background (beyond
-    # outer_r) gets σ=30, with linear blend in between. Keeps hair/plants on full heavy blur.
-    inner_r = 0.20 * min(W, H)  # ~128px at 640px: covers full face feature zone
-    outer_r = 0.35 * min(W, H)  # ~224px at 640px: hair/plants beyond this get σ=30
-    dist_weight = np.clip((dist_to_seed - inner_r) / (outer_r - inner_r), 0.0, 1.0).astype(np.float32)
-    luminance = (1.0 - dist_weight) * lum_light + dist_weight * lum_heavy
-
     dist_field = np.abs(xx - seed_x) + np.abs(yy - seed_y)
-    # Reduce luminance contribution far from seed so background iso-levels stay open/flowing
-    # rather than closing into loops around hair/plant texture features. Near seed: full
-    # lum_mix preserves face wrapping detail. Far background: 0.20× makes field ≈ radial.
-    effective_lum_mix = lum_mix * ((1.0 - dist_weight) * 1.0 + dist_weight * 0.70)
-    lum_field = (255.0 - luminance) * effective_lum_mix
+    field = dist_field + (255.0 - lum_pre) * lum_mix
 
-    field = dist_field + lum_field
-
-    return field, float(field.min()), float(field.max())
+    return field.astype(np.float32), float(field.min()), float(field.max())
 
 
 # --- Tunable knobs for the wave (L1-diamond) field. The ralph loop edits these

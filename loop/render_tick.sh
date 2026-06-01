@@ -31,7 +31,7 @@ iter_num=$((10#${1:?iter number required}))   # force base-10 ('033' is octal ot
 iter_pad=$(printf '%03d' "$iter_num")
 port="${PORT:-5055}"
 png_width="${PNG_WIDTH:-434}"
-method="${METHOD:-wave}"   # the loop now tunes the wave/diamond field
+method="${METHOD:-contour}"   # the loop tunes the uniform build_field (real formula)
 
 base="loop/output/iter_${iter_pad}"
 svg="${base}.svg"
@@ -56,12 +56,10 @@ trap 'rm -f "$resp"' EXIT
 
 curl -s --fail -X POST \
   -F "image=@${input}" \
-  -F "levels=111" \
+  -F "levels=65" \
   -F "smooth=0.00" \
-  -F "lum_mix=1.0" \
+  -F "lum_mix=0.8" \
   -F "wt_range=0.0" \
-  -F "seed_x=227" \
-  -F "seed_y=225" \
   -F "method=${method}" \
   "http://localhost:${port}/process" -o "$resp"
 

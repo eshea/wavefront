@@ -9,14 +9,18 @@ import numpy as np
 from skimage import measure
 
 
+# Level-spacing exponent (ralph loop tunes this). 1.0 = LINEAR = even spacing,
+# which matches the reference's near-uniform line density. The old 2.7
+# concentrated ~77% of levels near the seed, over-densifying the face.
+THRESHOLD_POWER = 1.3
+
+
 def compute_thresholds(field_min, field_max, n_levels):
     """
     Compute N power-spaced threshold values across the field range.
 
-    Uses power=2.7 spacing to concentrate iso-levels near field_min
-    (face/center region) and spread them near field_max (background). This
-    matches the reference behavior: dense rings in the face, sparse bands in
-    the background. Linear spacing puts ~60% of levels in the background.
+    THRESHOLD_POWER controls the distribution: 1.0 is linear (even line spacing,
+    like the reference); >1 concentrates levels near field_min (denser face).
 
     Args:
         field_min: minimum field value
@@ -28,7 +32,7 @@ def compute_thresholds(field_min, field_max, n_levels):
     """
     field_range = field_max - field_min
     fracs = [i / (n_levels + 1) for i in range(1, n_levels + 1)]
-    return [field_min + f ** 2.7 * field_range for f in fracs]
+    return [field_min + f ** THRESHOLD_POWER * field_range for f in fracs]
 
 
 def extract_contours(field, n_levels, field_min=None, field_max=None):
