@@ -29,6 +29,7 @@ import io
 import json
 import os
 import re
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -101,12 +102,16 @@ def labeled(text: str, path: Path) -> list[dict]:
     ]
 
 
-def call_llm(content: list[dict], timeout: int = 180) -> dict:
+def call_llm(content: list[dict], timeout: int = 45,
+             temperature: float = 0.0) -> dict:
+    # 45s, not the old 180s: a healthy judge replies in ~2s, and with
+    # --samples making N calls a long per-call timeout would stall the
+    # loop for minutes whenever the vLLM box is offline.
     payload = {
         "model": LLM_MODEL,
         "messages": [{"role": "user", "content": content}],
         "max_tokens": 400,
-        "temperature": 0,
+        "temperature": temperature,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     req = urllib.request.Request(
@@ -147,6 +152,11 @@ def main() -> int:
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--reference", type=Path, default=DEFAULT_REF)
     p.add_argument("--iter", type=int, default=None)
+    p.add_argument("--samples", type=int, default=1,
+                   help="number of independent judge calls; the reported "
+                        "judge_score is the median (de-noises outlier reads). "
+                        "N=1 uses temperature 0 (deterministic); N>1 draws at "
+                        "a small temperature so the samples actually vary.")
     args = p.parse_args()
 
     for path, name in [(args.output, "output"),
@@ -160,28 +170,48 @@ def main() -> int:
     content += labeled("ANCHOR_95 (humans rated 95):", ANCHOR_HIGH)
     content += labeled("CANDIDATE — score this:", args.output)
 
+    n = max(1, args.samples)
+    # Single sample stays deterministic (temp 0) for backward compat; with
+    # multiple samples we need genuine variation to de-noise, so draw warm.
+    temperature = 0.0 if n == 1 else 0.5
+
     t0 = time.monotonic()
-    try:
-        reply = call_llm(content)
-    except Exception as e:
-        sys.stderr.write(f"judge.py: LLM call failed: {e}\n")
+    samples: list[dict] = []  # successful parses only
+    last_err = None
+    for _ in range(n):
+        try:
+            parsed = parse(call_llm(content, temperature=temperature))
+        except Exception as e:  # network/HTTP blip — skip this draw
+            last_err = e
+            sys.stderr.write(f"judge.py: LLM call failed: {e}\n")
+            continue
+        if parsed["score"] >= 0:
+            samples.append(parsed)
+    elapsed = round(time.monotonic() - t0, 1)
+
+    if not samples:
         print(json.dumps({
             "iter": args.iter, "output": str(args.output),
-            "judge_score": -1, "judge_notes": f"call-failed: {e}",
-            "vs_anchor_high": "?", "model": LLM_MODEL,
-            "elapsed_s": round(time.monotonic() - t0, 1),
+            "judge_score": -1, "judge_notes": f"all {n} call(s) failed: {last_err}",
+            "vs_anchor_high": "?", "model": LLM_MODEL, "samples": n,
+            "elapsed_s": elapsed,
         }))
         return 1
 
-    parsed = parse(reply)
-    elapsed = round(time.monotonic() - t0, 1)
+    scores = [s["score"] for s in samples]
+    median = int(round(statistics.median(scores)))
+    # Notes come from the sample closest to the median (representative read).
+    rep = min(samples, key=lambda s: abs(s["score"] - median))
     rec = {
         "iter": args.iter,
         "output": str(args.output),
         "reference": str(args.reference),
-        "judge_score": parsed["score"],
-        "judge_notes": parsed["notes"],
-        "vs_anchor_high": parsed["vs_95"],
+        "judge_score": median,
+        "judge_notes": rep["notes"],
+        "vs_anchor_high": rep["vs_95"],
+        "judge_samples": scores,             # raw scores for audit
+        "judge_spread": max(scores) - min(scores),  # 0 == fully agreed
+        "samples": len(samples),             # successful draws
         "model": LLM_MODEL,
         "elapsed_s": elapsed,
     }

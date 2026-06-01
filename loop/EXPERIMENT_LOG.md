@@ -671,3 +671,23 @@ vs. iter_014 (anchor 95): 10 points below.
 **Analysis:** The key insight is that iter_014 scored 95 but did NOT use power=2.5 + sigma=8. It used sigma=16 (the committed baseline). The sigma=8 change (which helps in general) interacts badly with power=2.5 because: sigma=8 creates sharper local luminance gradients, which means more iso-levels cross through the same spatial area in the face zone. When combined with power=2.5's already aggressive face-zone concentration, the face becomes overly dense. Power=2.7 with sigma=8 is a better balance.
 
 **Next:** build — instead of changing power, try adjusting the field's weight_range parameter. The `wt_range=0.0` param controls how much distance weighting is mixed into the field. Try `wt_range=0.1` which would slightly spread iso-levels away from seed toward background — potentially opening up the face center while keeping background organic. Hypothesis: small positive wt_range with power=2.7 + sigma=8 is the missing ingredient to reach 90+.
+
+---
+
+## ⚠️ Numbering reconciliation (2026-05-31, harness-stabilization)
+
+The `## Iter NNN` headers above DRIFTED ahead of the real tick counter.
+Source of truth for what was actually rendered/scored is `loop/.iter` +
+`loop/metrics.jsonl`, NOT these headers. Known mapping:
+
+- log "Iter 045" → ralph tick **34** (output iter_034, metrics judge=15)
+- log "Iter 046" → ralph tick **35** (output iter_035, metrics judge=15)
+
+So per `metrics.jsonl` the last good scored render is **iter_033 (judge 85)**;
+ticks 34–35 regressed to 15 and the engine was reverted to the power=2.7
+config (now committed as the baseline). From tick 36 on, the header number
+is pinned to `$(cat loop/.iter)` (see PROMPT.md) so this can't recur.
+
+Also note: the judge 85↔15 swings on near-pixel-identical renders were
+largely judge NOISE — `judge.py` now takes the median of `--samples 3` to
+de-noise, and `guard_tick.sh` gates on that median.

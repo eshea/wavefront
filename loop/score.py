@@ -7,10 +7,18 @@ single JSON line with three scores. Designed to be invoked once per
 ralph tick; output is appended to loop/metrics.jsonl.
 
 Metrics:
-- path_fit  : 1 - min(1, |paths - target_paths| / target_paths). 1.0 is perfect.
-              Requires --stats-json with the /process response stats; otherwise null.
-- ssim      : structural similarity, grayscale, output resized to ref dims. 0..1.
-- edge_iou  : Intersection-over-Union of Canny edge maps. 0..1.
+- path_fit     : 1 - min(1, |paths - target_paths| / target_paths). 1.0 is perfect.
+                 Requires --stats-json with the /process response stats; otherwise null.
+- ink_coverage : fraction of non-white pixels in the output (0..1). Density
+                 CO-SIGNAL + degenerate-output guard. Measured empirically: it does
+                 NOT separate the judge's subtle "blob" failures from good outputs
+                 (judge-85 and judge-15 renders sit within ~3% of each other, and the
+                 human-rated-95 anchor is the densest of all). It only catches the
+                 unambiguous extremes — near-solid-black (>~0.92) or near-blank
+                 (<~0.03). Subtle over-density is the visual judge's call, not this.
+- ssim         : structural similarity, grayscale, output resized to ref dims. 0..1.
+                 CO-SIGNAL ONLY — near-flat across good and bad outputs; do not gate on it.
+- edge_iou     : IoU of Canny edge maps. 0..1. CO-SIGNAL ONLY (same caveat as ssim).
 
 Reference numbers come from contour_woman_settings.webp screenshot:
 target_paths=452, target_points=135962.
@@ -66,6 +74,21 @@ def compute_edge_iou(out_gray: np.ndarray, ref_gray: np.ndarray,
     return float(inter / union)
 
 
+def compute_ink_coverage(gray: np.ndarray, white_thresh: int = 250) -> float:
+    """Fraction of pixels darker than `white_thresh` (i.e. inked).
+
+    Computed on the output's own pixels (NOT resized to the reference) so
+    anti-aliasing from a resize can't inflate it. Use as a density
+    co-signal and a guard against degenerate output (near-solid-black or
+    near-blank). NOTE (measured): it does NOT cleanly separate the judge's
+    subtle over-dense "blob" failures — those differ from good outputs by
+    only a few percent here, so don't gate quality on a fine threshold;
+    only the extremes are unambiguous.
+    """
+    inked = int((gray < white_thresh).sum())
+    return float(inked / gray.size)
+
+
 def compute_path_fit(stats: dict | None) -> tuple[float | None, int | None,
                                                     int | None]:
     """Return (path_fit, paths, points). path_fit is None if no stats."""
@@ -99,7 +122,8 @@ def main() -> int:
 
     ref_gray = load_gray(args.reference)
     H, W = ref_gray.shape  # numpy: (rows, cols)
-    out_gray = load_gray(args.output, size=(W, H))
+    out_native = load_gray(args.output)          # native res — for ink_coverage
+    out_gray = load_gray(args.output, size=(W, H))  # resized — for ssim/edge
 
     record = {
         "iter": args.iter,
@@ -107,6 +131,7 @@ def main() -> int:
         "output": str(args.output),
         "reference": str(args.reference),
         "ref_size": [W, H],
+        "ink_coverage": round(compute_ink_coverage(out_native), 4),
         "ssim": round(compute_ssim(out_gray, ref_gray), 4),
         "edge_iou": round(compute_edge_iou(out_gray, ref_gray), 4),
         "target_paths": TARGET_PATHS,

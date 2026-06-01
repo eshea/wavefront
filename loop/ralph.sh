@@ -25,6 +25,7 @@ MAX_ITERS=${MAX_ITERS:-200}
 TOKEN_BUDGET=${TOKEN_BUDGET:-6000000}
 MODEL=${MODEL:-claude-sonnet-4-6}
 SLEEP_BETWEEN=${SLEEP_BETWEEN:-12}
+HOLDOUT_EVERY=${HOLDOUT_EVERY:-10}   # run the holdout overfit-check every N ticks
 
 mkdir -p loop/log loop/output
 
@@ -43,7 +44,7 @@ printf '\n'
 printf '═════════════════════════════════════════════════════════\n'
 printf ' RALPH LOOP · WAVEFRONT\n'
 printf ' duration=%ss  max_iters=%s  token_budget=%s\n' "$DURATION_SEC" "$MAX_ITERS" "$TOKEN_BUDGET"
-printf ' model=%s  sleep=%ss\n' "$MODEL" "$SLEEP_BETWEEN"
+printf ' model=%s  sleep=%ss  holdout_every=%s\n' "$MODEL" "$SLEEP_BETWEEN" "$HOLDOUT_EVERY"
 printf ' started=%s  iter=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$ITER"
 printf '═════════════════════════════════════════════════════════\n'
 
@@ -127,11 +128,25 @@ while true; do
   # Best effort — failures don't stop the loop.
   ./loop/score_tick.sh "$ITER" 2>/dev/null || true
 
+  # Deterministic quality gate: checkpoint engine/ on a good tick, or revert
+  # it on a regression. Backstop for when Claude fails to self-revert.
+  ./loop/guard_tick.sh "$ITER" || true
+
+  # Periodic holdout overfit-check (renders + judges an unseen image).
+  if [ "$HOLDOUT_EVERY" -gt 0 ] && [ $((ITER % HOLDOUT_EVERY)) -eq 0 ]; then
+    printf '[ralph] holdout overfit-check at iter %s\n' "$iter_pad"
+    ./loop/tests/holdout.sh || true
+  fi
+
   ITER=$((ITER + 1))
   printf '%s' "$ITER" > "$ITER_FILE"
 
   sleep "$SLEEP_BETWEEN"
 done
+
+# Final holdout overfit-check on the way out (best effort).
+printf '\n[ralph] final holdout overfit-check\n'
+./loop/tests/holdout.sh || true
 
 printf '\n═════════════════════════════════════════════════════════\n'
 printf ' RALPH LOOP ENDED\n'

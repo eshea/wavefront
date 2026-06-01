@@ -58,19 +58,33 @@ open('${out_stats}', 'w').write(json.dumps(d['stats']))
 
 rsvg-convert -w "$INPUT_W" "$out_svg" -o "$out_png" || { echo "FAIL: rsvg-convert"; exit 1; }
 
-score_line=$(source .venv/bin/activate && python loop/score.py \
+source .venv/bin/activate
+score_line=$(python loop/score.py \
   --output "$out_png" --reference "$REFERENCE" --stats-json "$out_stats")
 
-echo "$score_line" | TS="$ts" python3 -c "
+# Visual judge on the holdout too — a real overfitting signal. Pixel
+# edge_iou only proves "not blank"; the judge catches the case where
+# woman-tuned params produce garbage on a different subject.
+judge_line=$(python loop/judge.py --output "$out_png" --reference "$REFERENCE" \
+  --samples "${JUDGE_SAMPLES:-3}" 2>>loop/log/score_errors.log)
+
+echo "$score_line" | TS="$ts" JUDGE="$judge_line" python3 -c "
 import json, sys, os
 rec = json.loads(sys.stdin.read())
 rec['holdout'] = True
 rec['ts_run'] = os.environ['TS']
+judge = json.loads(os.environ['JUDGE']) if os.environ.get('JUDGE','').strip() else {}
+for k in ('judge_score', 'judge_notes', 'judge_spread', 'judge_samples'):
+    if k in judge:
+        rec[k] = judge[k]
 print(json.dumps(rec))
 " >> loop/holdout_metrics.jsonl
 
 iou=$(echo "$score_line" | python3 -c 'import json,sys; print(json.load(sys.stdin)["edge_iou"])')
-echo "[holdout] result: edge_iou=$iou (target > 0.02)"
+jscore=$(echo "$judge_line" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("judge_score","?"))
+except Exception: print("?")')
+echo "[holdout] result: edge_iou=$iou (target > 0.02) · judge=$jscore"
 
 if python3 -c "import sys; sys.exit(0 if $iou > 0.02 else 1)"; then
   echo "[holdout] PASS — engine produces non-trivial holdout output"

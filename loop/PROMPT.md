@@ -106,31 +106,20 @@ PORT=5055 python app.py &
 sleep 2
 ```
 
-Then render the canonical test:
+Then render the canonical test with the single render helper. It POSTs
+the exact canonical settings to `/process` and writes all three
+artifacts — `iter_NNN.svg`, `iter_NNN.png` (rasterized), and
+`iter_NNN.stats.json` (the path-count stats `score.py` needs for
+`path_fit`):
 
 ```
-ITER=$(printf '%03d' $(cat loop/.iter 2>/dev/null || echo 1))
-curl -s -X POST \
-  -F "image=@examples/contour_woman.webp" \
-  -F "levels=111" \
-  -F "smooth=0.00" \
-  -F "lum_mix=1.0" \
-  -F "wt_range=0.0" \
-  -F "seed_x=227" \
-  -F "seed_y=225" \
-  http://localhost:5055/process \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); open('loop/output/iter_${ITER}.svg','w').write(d['svg']); print('stats:', d['stats'])"
+./loop/render_tick.sh "$(cat loop/.iter 2>/dev/null || echo 1)"
 ```
 
-Rasterize to PNG using rsvg-convert (already installed on this machine
-via brew). This is REQUIRED so you can use Read to view your output as
-an image:
-
-```
-ITER=$(printf '%03d' $(cat loop/.iter 2>/dev/null || echo 1))
-rsvg-convert -w 434 loop/output/iter_${ITER}.svg \
-  -o loop/output/iter_${ITER}.png
-```
+Always use this helper rather than hand-rolling curl — it guarantees
+every tick renders identical settings and writes the stats.json without
+which `path_fit` stays null. (`PORT` defaults to 5055; override if you
+started the app elsewhere.)
 
 Then view your output and the reference visually:
 
@@ -148,7 +137,12 @@ density, noise in background regions, stroke uniformity.
 
 ## LOG ENTRY TEMPLATE
 
-Append to `loop/EXPERIMENT_LOG.md`:
+Append to `loop/EXPERIMENT_LOG.md`. **The header number MUST be the real
+tick number** — use exactly `$(cat loop/.iter)`, do NOT invent or
+increment it. (Past runs drifted the log headers ~11 ahead of the actual
+`.iter`/`metrics.jsonl` counter, which made the history impossible to
+audit. Render with `render_tick.sh` and the artifacts, metrics line, and
+log header all share one number.)
 
 ```
 ## Iter NNN · YYYY-MM-DD HH:MM · {one-line summary}

@@ -31,8 +31,10 @@ pixel_args=("--output" "$png" "--reference" "$ref" "--iter" "$iter_num")
 [ -f "$stats" ] && pixel_args+=("--stats-json" "$stats")
 pixel_line=$(python loop/score.py "${pixel_args[@]}" 2>>loop/log/score_errors.log)
 
-# Judge (1-3s on local LLM, can be slow if network blip)
-judge_line=$(python loop/judge.py --output "$png" --reference "$ref" --iter "$iter_num" 2>>loop/log/score_errors.log)
+# Judge (local LLM). 3 samples → median, to de-noise outlier reads.
+# Override count with JUDGE_SAMPLES (1 = old deterministic single call).
+judge_line=$(python loop/judge.py --output "$png" --reference "$ref" \
+  --iter "$iter_num" --samples "${JUDGE_SAMPLES:-3}" 2>>loop/log/score_errors.log)
 
 # Merge into one record. Both scripts emit single-line JSON.
 python3 -c "
@@ -40,7 +42,7 @@ import json, sys
 pixel = json.loads('''$pixel_line''') if '''$pixel_line'''.strip() else {}
 judge = json.loads('''$judge_line''') if '''$judge_line'''.strip() else {}
 merged = {**pixel}
-for k in ('judge_score', 'judge_notes', 'elapsed_s'):
+for k in ('judge_score', 'judge_notes', 'judge_spread', 'judge_samples', 'elapsed_s'):
     if k in judge:
         merged[k] = judge[k]
 print(json.dumps(merged))
@@ -50,5 +52,5 @@ print(json.dumps(merged))
 tail -1 loop/metrics.jsonl | python3 -c "
 import json, sys
 r = json.loads(sys.stdin.read())
-print(f\"[score_tick] iter {r.get('iter','?')}: judge={r.get('judge_score','?')} ssim={r.get('ssim','?')} edge_iou={r.get('edge_iou','?')} path_fit={r.get('path_fit','?')}\")
+print(f\"[score_tick] iter {r.get('iter','?')}: judge={r.get('judge_score','?')} (spread={r.get('judge_spread','?')}) path_fit={r.get('path_fit','?')} ink={r.get('ink_coverage','?')} ssim={r.get('ssim','?')}\")
 "
