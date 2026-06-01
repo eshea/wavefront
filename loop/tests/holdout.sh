@@ -49,6 +49,7 @@ curl -s -X POST \
   -F "image=@${INPUT}" \
   -F "levels=111" -F "smooth=0.00" -F "lum_mix=1.0" -F "wt_range=0.0" \
   -F "seed_x=${SEED_X}" -F "seed_y=${SEED_Y}" \
+  -F "method=${METHOD:-wave}" \
   http://localhost:5055/process | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
