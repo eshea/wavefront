@@ -19,19 +19,19 @@ Emits one JSON line:
     {"output":..., "judge_score": 0..100, "judge_notes":...,
      "vs_anchor_high":..., "model":..., "elapsed_s":...}
 
-Backend (OpenAI-compatible /v1/chat/completions):
-    WAVEFRONT_LLM        base URL (default http://192.168.50.135:8000, the vLLM
-                         Qwen3 box). To use the llama.cpp Qwen3.5-abliterated
-                         vision server instead, just set
-                             WAVEFRONT_LLM=http://192.168.50.135:5002
-                         llama.cpp ignores the model field, so WAVEFRONT_LLM_MODEL
-                         can stay default. The vLLM-only `chat_template_kwargs`
-                         param we send is harmlessly ignored by llama.cpp.
-    ⚠ SCALE WARNING: different backends do NOT score on the same scale (a good
-      render is ~85 on vLLM-Qwen3 but ~40 on llama.cpp-Qwen3.5-abl). Every record
-      carries `judge_backend` so scales aren't silently mixed — don't compare
-      scores across backends, and re-tune GUARD_FLOOR (loop/guard_tick.sh) to the
-      active judge or it will revert every tick.
+Backend (OpenAI-compatible /v1/chat/completions) — AUTO-FALLBACK:
+    The judge probes known vision backends and uses the first one that's live,
+    so it keeps working when a box is down:
+        1. http://192.168.50.135:8000  (vLLM Qwen3)
+        2. http://192.168.50.135:5002  (llama.cpp Qwen3.5-abliterated)
+    WAVEFRONT_LLM           moves a base URL to the front of the probe order.
+    WAVEFRONT_LLM_BACKENDS  comma-separated list to REPLACE the candidates.
+    WAVEFRONT_LLM_MODEL     model field (default "qwen"; llama.cpp ignores it).
+    The vLLM-only `chat_template_kwargs` we send is ignored harmlessly elsewhere.
+    ⚠ SCALE WARNING: backends do NOT score on the same scale (a good render is
+      ~85 on vLLM-Qwen3 but ~40 on llama.cpp-Qwen3.5-abl). Every record carries
+      `judge_backend`; guard_tick.sh keys its floor off it and only compares
+      within the same backend, so a fallback can't trigger a false regression.
 
 CLI:
     python loop/judge.py --output PATH [--reference PATH] [--iter N] [--samples N]
@@ -55,6 +55,61 @@ from PIL import Image
 LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://192.168.50.135:8000")
 LLM_MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
 MAX_SIDE = 512
+
+# Known interchangeable vision backends, in default-preference order: the vLLM
+# Qwen3 box, then the llama.cpp Qwen3.5-abliterated box. resolve_backend()
+# probes these and uses the first one that's live, so the judge keeps working
+# when one server is down. Override the whole list with WAVEFRONT_LLM_BACKENDS
+# (comma-separated). NOTE: backends score on DIFFERENT scales — every record
+# stamps judge_backend, and guard_tick.sh keys its thresholds off it.
+KNOWN_BACKENDS = [
+    "http://192.168.50.135:8000",   # vLLM Qwen3
+    "http://192.168.50.135:5002",   # llama.cpp Qwen3.5-abliterated
+]
+
+
+def _candidate_backends() -> list[str]:
+    """Ordered, de-duplicated list of backends to try."""
+    raw = os.environ.get("WAVEFRONT_LLM_BACKENDS")
+    if raw:
+        cands = [b.strip().rstrip("/") for b in raw.split(",") if b.strip()]
+    else:
+        # Primary (WAVEFRONT_LLM / default vLLM) first, then any other known box.
+        primary = LLM_BASE.rstrip("/")
+        cands = [primary] + [b for b in KNOWN_BACKENDS if b.rstrip("/") != primary]
+    seen, ordered = set(), []
+    for c in cands:
+        if c not in seen:
+            seen.add(c); ordered.append(c)
+    return ordered
+
+
+def _is_live(base: str, timeout: float = 3.0) -> bool:
+    """Quick liveness probe — GET /v1/models (both vLLM and llama.cpp serve it)."""
+    try:
+        req = urllib.request.Request(f"{base}/v1/models", method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
+def resolve_backend() -> str:
+    """Return the first live backend (probed in preference order).
+
+    Falls back to the first candidate if none answer, so the subsequent
+    call_llm fails with a clear error rather than silently doing nothing.
+    """
+    cands = _candidate_backends()
+    if len(cands) == 1:
+        return cands[0]                      # nothing to fall back to; skip probes
+    for base in cands:
+        if _is_live(base):
+            sys.stderr.write(f"judge.py: using backend {base}\n")
+            return base
+    sys.stderr.write(
+        f"judge.py: no backend live among {cands}; trying {cands[0]} anyway\n")
+    return cands[0]
 
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_REF = REPO / "examples" / "contour_woman_post1.jpeg"
@@ -117,7 +172,7 @@ def labeled(text: str, path: Path) -> list[dict]:
 
 
 def call_llm(content: list[dict], timeout: int = 45,
-             temperature: float = 0.0) -> dict:
+             temperature: float = 0.0, base: str = LLM_BASE) -> dict:
     # 45s, not the old 180s: a healthy judge replies in ~2s, and with
     # --samples making N calls a long per-call timeout would stall the
     # loop for minutes whenever the vLLM box is offline.
@@ -129,7 +184,7 @@ def call_llm(content: list[dict], timeout: int = 45,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     req = urllib.request.Request(
-        f"{LLM_BASE}/v1/chat/completions",
+        f"{base}/v1/chat/completions",
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
@@ -189,12 +244,16 @@ def main() -> int:
     # multiple samples we need genuine variation to de-noise, so draw warm.
     temperature = 0.0 if n == 1 else 0.5
 
+    # Pick a live backend once, up front, and use it for every sample (never
+    # switch mid-scoring — that would mix scales within one judge_score).
+    backend = resolve_backend()
+
     t0 = time.monotonic()
     samples: list[dict] = []  # successful parses only
     last_err = None
     for _ in range(n):
         try:
-            parsed = parse(call_llm(content, temperature=temperature))
+            parsed = parse(call_llm(content, temperature=temperature, base=backend))
         except Exception as e:  # network/HTTP blip — skip this draw
             last_err = e
             sys.stderr.write(f"judge.py: LLM call failed: {e}\n")
@@ -207,7 +266,7 @@ def main() -> int:
         print(json.dumps({
             "iter": args.iter, "output": str(args.output),
             "judge_score": -1, "judge_notes": f"all {n} call(s) failed: {last_err}",
-            "vs_anchor_high": "?", "model": LLM_MODEL, "judge_backend": LLM_BASE,
+            "vs_anchor_high": "?", "model": LLM_MODEL, "judge_backend": backend,
             "samples": n, "elapsed_s": elapsed,
         }))
         return 1
@@ -227,7 +286,7 @@ def main() -> int:
         "judge_spread": max(scores) - min(scores),  # 0 == fully agreed
         "samples": len(samples),             # successful draws
         "model": LLM_MODEL,
-        "judge_backend": LLM_BASE,           # which server scored this — scores
+        "judge_backend": backend,            # which server scored this — scores
                                              # from different backends are NOT on
                                              # the same scale; don't compare them
         "elapsed_s": elapsed,

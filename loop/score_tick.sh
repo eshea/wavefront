@@ -13,7 +13,8 @@
 set -u
 cd "$(dirname "$0")/.."
 
-iter_num="${1:?iter number required}"
+iter_num=$((10#${1:?iter number required}))   # 10# = force base-10 (a padded
+                                              # '033' would otherwise be octal)
 iter_pad=$(printf '%03d' "$iter_num")
 png="loop/output/iter_${iter_pad}.png"
 stats="loop/output/iter_${iter_pad}.stats.json"

@@ -27,7 +27,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-iter_num="${1:?iter number required}"
+iter_num=$((10#${1:?iter number required}))   # force base-10 ('033' is octal otherwise)
 iter_pad=$(printf '%03d' "$iter_num")
 port="${PORT:-5055}"
 png_width="${PNG_WIDTH:-434}"

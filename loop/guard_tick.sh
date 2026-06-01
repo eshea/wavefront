@@ -23,15 +23,16 @@
 #
 # Usage:   ./loop/guard_tick.sh <iter_number>
 # Env:     GUARD_FLOOR(60) GUARD_DROP(20) GUARD_INK_HI(0.92) GUARD_INK_LO(0.03)
-#          GUARD_DISABLE(unset) GUARD_NO_COMMIT(unset)
-# NOTE: GUARD_FLOOR is on the JUDGE'S scale, which is backend-specific. 60 suits
-# the vLLM-Qwen3 judge (good ~85); the llama.cpp-Qwen3.5-abl judge rates good
-# renders ~40, so with that backend set e.g. GUARD_FLOOR=25 or it reverts every
-# tick. The relative-regression gate (GUARD_DROP vs recent best) is scale-robust.
+#          GUARD_FLOORS("8000=60,5002=25") GUARD_DISABLE GUARD_NO_COMMIT
+# Backend-aware: judge scales differ per backend (good render ~85 on vLLM-Qwen3,
+# ~40 on llama.cpp-Qwen3.5-abl :5002). The absolute floor is chosen per backend
+# from GUARD_FLOORS (matched by substring of the record's judge_backend), and the
+# relative-regression gate only compares within the SAME backend — so judge.py's
+# auto-fallback to a different-scale box can't trigger a false revert.
 set -u
 cd "$(dirname "$0")/.."
 
-iter_num="${1:?iter number required}"
+iter_num=$((10#${1:?iter number required}))   # force base-10 ('033' is octal otherwise)
 
 if [ -n "${GUARD_DISABLE:-}" ]; then
   echo "[guard] disabled via GUARD_DISABLE"; exit 0
@@ -46,6 +47,20 @@ FLOOR  = float(os.environ.get("GUARD_FLOOR", 60))
 DROP   = float(os.environ.get("GUARD_DROP", 20))
 INK_HI = float(os.environ.get("GUARD_INK_HI", 0.92))
 INK_LO = float(os.environ.get("GUARD_INK_LO", 0.03))
+# Per-backend floor map "substr=floor,...". Judge scales differ by backend
+# (good render ~85 on vLLM-Qwen3, ~40 on llama.cpp-Qwen3.5-abl :5002), so the
+# absolute floor must track whichever backend produced the score. A backend
+# matching no key falls back to GUARD_FLOOR.
+FLOORS = os.environ.get("GUARD_FLOORS", "8000=60,5002=25")
+
+def floor_for(backend: str) -> float:
+    for pair in FLOORS.split(","):
+        if "=" in pair:
+            key, val = pair.split("=", 1)
+            if key.strip() and key.strip() in (backend or ""):
+                try: return float(val)
+                except ValueError: pass
+    return FLOOR
 
 rows = []
 try:
@@ -63,8 +78,9 @@ cur = next((r for r in reversed(rows) if r.get("iter") == iter_num), None)
 if cur is None:
     print(f"SKIP no-record-for-iter-{iter_num}"); sys.exit(0)
 
-judge = cur.get("judge_score")
-ink   = cur.get("ink_coverage")
+judge   = cur.get("judge_score")
+ink     = cur.get("ink_coverage")
+backend = cur.get("judge_backend", "")
 
 if judge is None or judge < 0:
     print("SKIP judge-unavailable"); sys.exit(0)
@@ -75,13 +91,18 @@ if ink is not None and ink > INK_HI:
 if ink is not None and ink < INK_LO:
     print(f"FAIL degenerate-blank ink={ink:.3f}<{INK_LO}"); sys.exit(0)
 
-# Absolute floor.
-if judge < FLOOR:
-    print(f"FAIL below-floor judge={judge}<{FLOOR}"); sys.exit(0)
+# Absolute floor, on this backend's scale.
+floor = floor_for(backend)
+if judge < floor:
+    print(f"FAIL below-floor judge={judge}<{floor:g} (backend={backend or '?'})")
+    sys.exit(0)
 
-# Relative regression vs recent best (last up-to-10 valid PRIOR ticks).
+# Relative regression vs recent best — only among PRIOR ticks scored by the
+# SAME backend, so an auto-fallback to a different-scale judge can't look like
+# a regression. (If this backend is unknown, compare within unknowns too.)
 prior = [r.get("judge_score") for r in rows
          if r.get("iter") != iter_num
+         and r.get("judge_backend", "") == backend
          and isinstance(r.get("judge_score"), (int, float))
          and r.get("judge_score") >= 0]
 prior = prior[-10:]
@@ -90,7 +111,7 @@ if prior:
     if judge < best - DROP:
         print(f"FAIL regression judge={judge}<best{best}-{DROP:g}"); sys.exit(0)
 
-print(f"PASS judge={judge} ink={ink}")
+print(f"PASS judge={judge} ink={ink} backend={backend or '?'}")
 PY
 )
 
