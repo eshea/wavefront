@@ -112,45 +112,59 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
     return field, float(field.min()), float(field.max())
 
 
-def build_wave_field(luminance, seed_x, seed_y, lum_mix=1.0, sigma=8.0):
-    """Approach 2: true wave-propagation (eikonal) travel-time field.
+# --- Tunable knobs for the wave (L1-diamond) field. The ralph loop edits these
+# the same way it edits engine/contour.py's power=2.7. ---
+WAVE_DIAMOND = 0.0      # extra crisp-diamond bias: 0 = full ripple, 1 = ignore the face
+WAVE_RELIEF = 0.45      # luminance ripple amplitude (× lum_mix). Low => diamonds dominate
+WAVE_SIGMA_FACE = 8.0   # luminance blur near the seed (preserves feature wrap)
+WAVE_SIGMA_BG = 30.0    # luminance blur far from the seed (suppresses hair/bg texture)
+WAVE_FAR = 0.20         # far-field ripple multiplier (low => clean background diamonds)
+WAVE_INNER = 0.20       # face zone radius (fraction of min(W,H))
+WAVE_OUTER = 0.42       # background zone radius (fraction of min(W,H))
 
-    Instead of ADDING a luminance penalty to a geometric distance (build_field),
-    this solves the eikonal equation |grad T| = 1 / speed with a fast-marching
-    method, where image luminance sets the local wave SPEED:
 
-        bright pixels  -> fast  -> wavefront races through, rings spread out
-        dark pixels    -> slow  -> wavefront crawls, rings bunch up
+def build_wave_field(luminance, seed_x, seed_y, lum_mix=1.0, diamond=None,
+                     relief=WAVE_RELIEF, far=WAVE_FAR):
+    """Wave/diamond field: an L1 (Manhattan) distance dominated by geometry, with
+    a GENTLE luminance relief so the diamonds ripple around features.
 
-    So iso-contours of travel-time T naturally bunch in dark feature zones
-    (eyes/nose/mouth, hair) and open up over bright skin/background — the
-    "stone dropped in thick/thin water" effect. lum_mix controls the speed
-    contrast (how much darkness slows the wave).
+    Matches the VEX-LINE / CONTOUR-V signature: crisp concentric DIAMONDS
+    (Manhattan distance from the seed) that stay topologically intact everywhere,
+    bending — not breaking into loops — around eyes/nose/mouth. The relief is kept
+    small relative to the L1 gradient (so it never creates closed loops) and is
+    suppressed far from the seed (so hair/background render as clean diamonds, not
+    dense texture). This is the key difference from build_field, whose full-strength
+    luminance term over-densifies the face into a smudgy blob.
 
-    Returns the same (field, field_min, field_max) tuple as build_field so the
-    existing power-spaced threshold + marching-squares extraction is reused.
+        field[y,x] = (|x-seed_x| + |y-seed_y|)              # L1 diamond base (px)
+                     + relief * lum_mix * (1-diamond) * w[y,x] * (255 - lum_blur)
+
+    where w fades the relief from full (face zone) to `far` (background).
+
+    diamond (0..1) biases toward pure crisp diamonds; relief scales the ripple.
+    Returns the same (field, field_min, field_max) tuple as build_field.
     """
-    import skfmm  # local import: only needed for method=wave
-
+    d = WAVE_DIAMOND if diamond is None else float(np.clip(diamond, 0.0, 1.0))
     H, W = luminance.shape
-    lum = gaussian_filter(luminance, sigma=sigma) / 255.0   # 0..1, smoothed
 
-    # Speed map. floor keeps speed strictly > 0 (skfmm needs that, else inf time);
-    # lum_mix sharpens the bright/dark speed ratio. gamma>1 deepens dark slow-down.
-    floor = 0.04
-    gamma = 1.0 + 2.0 * float(lum_mix)        # lum_mix 1.0 -> gamma 3
-    speed = floor + (1.0 - floor) * np.power(np.clip(lum, 0.0, 1.0), gamma)
-    speed = speed.astype(np.float64)
+    # Adaptive luminance blur: light near the seed (keep feature detail), heavy
+    # far away (kill texture) — same idea build_field uses.
+    lum_light = gaussian_filter(luminance, sigma=WAVE_SIGMA_FACE)
+    lum_heavy = gaussian_filter(luminance, sigma=WAVE_SIGMA_BG)
+    xs = np.arange(W, dtype=np.float32)
+    ys = np.arange(H, dtype=np.float32)
+    xx, yy = np.meshgrid(xs, ys)
+    dist = np.sqrt((xx - seed_x) ** 2 + (yy - seed_y) ** 2)
+    inner = WAVE_INNER * min(W, H)
+    outer = WAVE_OUTER * min(W, H)
+    dw = np.clip((dist - inner) / (outer - inner), 0.0, 1.0).astype(np.float32)
+    lum_blend = (1.0 - dw) * lum_light + dw * lum_heavy
 
-    # phi: zero level-set at the seed (a small negative seed cell), positive
-    # elsewhere; travel_time integrates outward from that interface.
-    phi = np.ones((H, W), dtype=np.float64)
-    sy = int(np.clip(seed_y, 0, H - 1))
-    sx = int(np.clip(seed_x, 0, W - 1))
-    phi[sy, sx] = -1.0
+    # L1 diamond base (pixels) dominates the gradient -> crisp global diamonds.
+    l1 = np.abs(xx - seed_x) + np.abs(yy - seed_y)
+    # Gentle relief, full strength in the face zone, fading to `far` in the bg.
+    relief_w = (1.0 - dw) * 1.0 + dw * far
+    ripple = (255.0 - lum_blend) * relief * float(lum_mix) * (1.0 - d) * relief_w
 
-    tt = skfmm.travel_time(phi, speed, dx=1.0)
-    # travel_time returns a masked array; fill any unreachable cells with the max.
-    field = np.ma.filled(tt, tt.max()).astype(np.float32)
-
+    field = (l1 + ripple).astype(np.float32)
     return field, float(field.min()), float(field.max())

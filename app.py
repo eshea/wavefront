@@ -12,7 +12,8 @@ import traceback
 from flask import Flask, render_template, request, jsonify
 from PIL import Image, UnidentifiedImageError
 
-from engine.field import load_and_preprocess, to_luminance, build_field, build_wave_field
+from engine.field import (load_and_preprocess, to_luminance, build_field,
+                          build_wave_field, WAVE_DIAMOND)
 from engine.contour import extract_contours, scale_contours
 from engine.smooth import smooth_contours
 from engine.export import contours_to_svg_string_fast
@@ -124,6 +125,7 @@ def process():
         method = request.form.get('method', 'contour').strip().lower()
         if method not in METHODS:
             method = 'contour'
+        diamond = _parse_float_param('diamond', WAVE_DIAMOND, 0.0, 1.0)  # wave only
 
         try:
             rgb_array, original_size, processed_size = load_and_preprocess(image_file)
@@ -147,7 +149,7 @@ def process():
             contours, stats = trace_flow_lines(luminance, sx, sy, levels, lum_mix)
         else:
             if method == 'wave':
-                field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix)
+                field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix, diamond)
             else:
                 field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
             contours, stats = extract_contours(field, levels, f_min, f_max)

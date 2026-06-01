@@ -112,7 +112,9 @@ def resolve_backend() -> str:
     return cands[0]
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_REF = REPO / "examples" / "contour_woman_post1.jpeg"
+DEFAULT_REF = REPO / "examples" / "contour_woman_lineart.png"  # clean line-art
+# (cropped from the CONTOUR-V CORE screenshot — same woman, clean diamond geometry,
+#  a sharper target than the ink-on-photo contour_woman_post1.jpeg)
 ANCHOR_HIGH = REPO / "loop" / "output" / "iter_014.png"  # humans rate 95
 ANCHOR_LOW_DESC = (
     "ANCHOR_15 (not shown): a previous candidate that was nearly blank "

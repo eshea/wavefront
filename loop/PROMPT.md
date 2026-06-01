@@ -15,12 +15,26 @@ Do one focused cycle and stop.**
 The `examples/` folder contains the artist's actual input → output pairs.
 These are what "good" looks like. You are matching these.
 
-| Input (pre) | Reference outputs (post) | Known settings |
+| Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/contour_woman.webp` | `examples/contour_woman_post1.jpeg`, `post2.jpeg`, `post3.jpeg`, `post4.webp`, `post5.webp` | seed=(227,225), CONTOURS=111, LINE SMOOTH=0.00 (from `contour_woman_settings.webp`) |
+| `examples/contour_woman.webp` | `examples/contour_woman_lineart.png` (clean diamond line-art; also `contour_woman_post*`) | seed=(227,225), CONTOURS=111 |
 
-The woman pair is the **canonical test**. Use it. The exact settings
-above are baked into `loop/score_tick.sh`.
+The woman is the **canonical test**, baked into `loop/render_tick.sh` +
+`loop/score_tick.sh`. Also study the new style references in `examples/`
+(the blue VEX-LINE face, `Screenshot ... CONTOUR-V CORE`, Motoko) with
+the Read tool — they are output-only (no inputs), pure visual targets.
+
+### WHAT YOU ARE TUNING NOW: the WAVE / DIAMOND field
+The canonical render uses **`method=wave`** (`render_tick.sh` sets it).
+The target signature is a crisp concentric **L1 DIAMOND** radiating from
+the seed that bends — but never breaks into loops — around eyes/nose/mouth,
+evenly spaced with clean white background. Your knobs live in
+**`engine/field.py` → `build_wave_field`** (module constants):
+`WAVE_RELIEF` (ripple amplitude — low ⇒ diamonds dominate), `WAVE_DIAMOND`
+(0=full ripple … 1=ignore face), `WAVE_SIGMA_FACE`/`WAVE_SIGMA_BG` (blur),
+`WAVE_FAR` (background-ripple suppression), `WAVE_INNER`/`WAVE_OUTER` (zone
+radii). Also `engine/contour.py` power spacing. Tune ONE per tick.
+Do NOT touch `build_field` (the legacy `method=contour`).
 
 **HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
 `loop/holdout/contour_space_post.webp` are the held-out test set. Do
@@ -33,12 +47,15 @@ want to check for overfitting.
 After each tick, `loop/score_tick.sh` runs automatically and appends
 one JSON line to `loop/metrics.jsonl` with three numbers per output:
 
-- `judge_score` (0–100, **primary metric**) — visual judgment from a
-  local Qwen3 122B vision model. This is well-aligned with human
-  judgment. Higher = better.
-- `ssim` (0–1, secondary) — pixel-level structural similarity. Misleading
-  on its own (rewards whitespace match), useful only as a co-signal.
-- `edge_iou` (0–1, secondary) — Canny edge agreement. Same caveat.
+- `judge_score` (0–100, **primary metric**) — MEDIAN of several reads from
+  a local vision model (`judge.py --samples`). Higher = better. NOTE the
+  absolute scale depends on `judge_backend` (a good render is ~85 on the
+  vLLM box, ~40–55 on the llama.cpp box); judge a tick only against ticks
+  with the SAME `judge_backend`. Watch `judge_spread` — if it's large the
+  read is noisy.
+- `ink_coverage` (0–1) — non-white fraction. Density co-signal + guard
+  against degenerate near-solid / near-blank output.
+- `ssim`, `edge_iou` (0–1) — pixel co-signals only; near-flat, don't chase.
 - `path_fit` (0–1) — closeness to reference path count (452). Sanity.
 
 **Before deciding what to try this tick**, run:
@@ -50,11 +67,12 @@ across the last 3-5 ticks, your recent hypotheses aren't working — try
 something qualitatively different (revert to an earlier sweet-spot
 config? change a different parameter?).
 
-**Iter 014 was the human-judged best (score 95).** Iter 001 also 92.
-Later iters regressed (loop over-blurred). Your job: get back above 95
-on judge_score, ideally hitting 100. Don't trust your own visual
-judgment over the metric — if your change drops judge_score below the
-last 3 iters' average, `git checkout --` it before exiting.
+Your job: raise the `judge_score` median toward the diamond reference,
+tick by tick. Scores are RELATIVE to the current judge backend — aim to
+beat the recent best on the same backend. A deterministic guard
+(`loop/guard_tick.sh`) auto-commits a passing tick and auto-reverts a
+regression, but still `git checkout -- engine/` your own change before
+exiting if you can see it made things worse.
 
 **Include the latest score line in your log entry.** Use `tail -1
 loop/metrics.jsonl` after `score_tick.sh` runs.
@@ -126,7 +144,7 @@ Then view your output and the reference visually:
 ```
 # In your prompt, use Read on both:
 Read loop/output/iter_NNN.png
-Read examples/contour_woman_post1.jpeg
+Read examples/contour_woman_lineart.png
 ```
 
 Read returns images visually. Look at them and compare specifically:
@@ -152,9 +170,9 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (woman, seed 227,225, lvl 111, smooth 0.00)
+**Test:** canonical (woman, seed 227,225, lvl 111, method=wave)
 - output: `loop/output/iter_NNN.svg` ({stats})
-- reference: `examples/contour_woman_post1.jpeg`
+- reference: `examples/contour_woman_lineart.png`
 - visual comparison: {what you saw — be specific}
 
 **Score:** judge=NN ssim=0.0NNN edge_iou=0.NNNN path_fit=0.NN
