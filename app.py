@@ -12,10 +12,13 @@ import traceback
 from flask import Flask, render_template, request, jsonify
 from PIL import Image, UnidentifiedImageError
 
-from engine.field import load_and_preprocess, to_luminance, build_field
+from engine.field import load_and_preprocess, to_luminance, build_field, build_wave_field
 from engine.contour import extract_contours, scale_contours
 from engine.smooth import smooth_contours
 from engine.export import contours_to_svg_string_fast
+from engine.flow import trace_flow_lines
+
+METHODS = ('contour', 'wave', 'flow')  # contour = classic isolines (default)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max upload
@@ -118,6 +121,9 @@ def process():
         wt_range = _parse_float_param('wt_range', 0.6, 0.0, 1.0)
         seed_x = _parse_optional_int_param('seed_x')
         seed_y = _parse_optional_int_param('seed_y')
+        method = request.form.get('method', 'contour').strip().lower()
+        if method not in METHODS:
+            method = 'contour'
 
         try:
             rgb_array, original_size, processed_size = load_and_preprocess(image_file)
@@ -133,9 +139,19 @@ def process():
         sx = max(0, min(img_w - 1, sx))
         sy = max(0, min(img_h - 1, sy))
 
-        field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
-
-        contours, stats = extract_contours(field, levels, f_min, f_max)
+        # Field-construction method:
+        #   contour (default) — additive Manhattan+luminance field, marching squares
+        #   wave              — eikonal travel-time field (Approach 2), marching squares
+        #   flow              — gradient streamlines (Approach 3), traced directly
+        if method == 'flow':
+            contours, stats = trace_flow_lines(luminance, sx, sy, levels, lum_mix)
+        else:
+            if method == 'wave':
+                field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix)
+            else:
+                field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
+            contours, stats = extract_contours(field, levels, f_min, f_max)
+        stats['method'] = method
 
         contours = smooth_contours(contours, smooth)
 

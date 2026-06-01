@@ -66,7 +66,7 @@ score_line=$(python loop/score.py \
 # edge_iou only proves "not blank"; the judge catches the case where
 # woman-tuned params produce garbage on a different subject.
 judge_line=$(python loop/judge.py --output "$out_png" --reference "$REFERENCE" \
-  --samples "${JUDGE_SAMPLES:-3}" 2>>loop/log/score_errors.log)
+  --samples "${JUDGE_SAMPLES:-5}" 2>>loop/log/score_errors.log)
 
 echo "$score_line" | TS="$ts" JUDGE="$judge_line" python3 -c "
 import json, sys, os

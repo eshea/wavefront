@@ -35,7 +35,7 @@ pixel_line=$(python loop/score.py "${pixel_args[@]}" 2>>loop/log/score_errors.lo
 # Judge (local LLM). 3 samples → median, to de-noise outlier reads.
 # Override count with JUDGE_SAMPLES (1 = old deterministic single call).
 judge_line=$(python loop/judge.py --output "$png" --reference "$ref" \
-  --iter "$iter_num" --samples "${JUDGE_SAMPLES:-3}" 2>>loop/log/score_errors.log)
+  --iter "$iter_num" --samples "${JUDGE_SAMPLES:-5}" 2>>loop/log/score_errors.log)
 
 # Merge into one record. Both scripts emit single-line JSON.
 python3 -c "
