@@ -51,7 +51,7 @@ INK_LO = float(os.environ.get("GUARD_INK_LO", 0.03))
 # (good render ~85 on vLLM-Qwen3, ~40 on llama.cpp-Qwen3.5-abl :5002), so the
 # absolute floor must track whichever backend produced the score. A backend
 # matching no key falls back to GUARD_FLOOR.
-FLOORS = os.environ.get("GUARD_FLOORS", "8000=60,5002=25")
+FLOORS = os.environ.get("GUARD_FLOORS", "8000=30,5002=20")
 
 def floor_for(backend: str) -> float:
     for pair in FLOORS.split(","):

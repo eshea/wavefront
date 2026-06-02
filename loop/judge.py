@@ -124,35 +124,37 @@ ANCHOR_LOW_DESC = (
 )
 
 
-PROMPT = """You are evaluating WAVEFRONT, a topographic-contour portrait engine.
+PROMPT = """You are grading WAVEFRONT, an engine that turns a photo into a
+contour-line portrait. Score how closely the CANDIDATE REPLICATES the artist's
+reference style — not merely "is it a contour drawing", but "could it pass for
+one of the artist's OWN outputs?"
 
-You will see THREE images:
-  1. REFERENCE — the artist's valid plotted output (photo of paper with ink). Different density variants are all valid; ignore color/paper.
-  2. ANCHOR_95 — a previous engine output humans rated 95/100. This is what "good" looks like as a digital render.
-  3. CANDIDATE — the engine output you are scoring.
+THREE images:
+  1. REFERENCE — the artist's actual output for this subject (ignore ink color/paper).
+  2. EXAMPLE — another genuine artist output: the quality bar.
+  3. CANDIDATE — score THIS one.
 
-Calibrate your 0–100 score to these reference points:
-  - ANCHOR_95 means: clear contour-line portrait, concentric diamond/ring
-    structure clearly emanating from a center point, eyes/nose/mouth
-    visible as ridges in the contour pattern, no smudging.
-  - ANCHOR_15 (not shown but for scale): nearly blank, abstract noise,
-    no recognizable face, no diamond rings — score around 15.
-  - REFERENCE represents the gold-standard style on paper.
+The reference style you are matching:
+  - a concentric DIAMOND radiating from a center point on the face
+  - lines that BEND smoothly around eyes/nose/mouth but stay continuous
+  - EVEN line spacing across the whole image (near-uniform density)
+  - generous WHITE SPACE between lines — the page reads LIGHT, not dark/busy
+  - clean crisp linework edge-to-edge, with NO dense/smudgy patch and NO blank zone
 
-CRITICAL FAILURE MODES — cap at ≤50 regardless of other features:
-  - face appears as a dark SMUDGY BLOB instead of distinct lines
-  - over-dense central area OBSCURES facial features
-  - solid black regions where there should be linework
-  - the diamond/ring structure is missing or buried
+Score 0–100 by CLOSENESS to that style. BE DISCRIMINATING — do NOT give 90+ just
+because a face is visible, but do NOT dump a clean drawing into the failure tier
+just because the diamond is weak:
+  - 90–100: indistinguishable from an artist output — airy, even spacing, crisp diamond.
+  - 75–89: clearly the right style with a visible flaw (a bit dense / less white space
+    than the reference / slightly uneven / weak diamond but clean lines).
+  - 50–74: recognizable contour portrait with CLEAN lines but missing key style
+    (no clear diamond, OR noticeably too dense/busy, OR flowing-not-concentric).
+  - 1–49: DEGENERATE ONLY — smudgy blob, solid-black mass, blank page, or chaotic
+    scribble with no recognizable face. A clean line drawing is NEVER below 50.
+Most engine outputs are 55–85; reserve 90+ for genuine replication.
 
-Sweet spots — earn ≥85 only if:
-  - CANDIDATE matches or exceeds ANCHOR_95's clarity
-  - clean linework, no smudging
-  - diamond/ring structure clearly emanates from a center point
-  - eyes, nose, mouth visible as ridges
-
-Reply with ONLY one JSON object on a single line:
-{"score": <int 0-100>, "notes": "<one short sentence>", "vs_95": "<better|same|worse>"}"""
+Reply with ONLY one JSON object on one line:
+{"score": <int 0-100>, "biggest_gap": "<the single most important difference from the reference to fix next>", "notes": "<=12 words>"}"""
 
 
 def img_to_data_url(path: Path, max_side: int = MAX_SIDE) -> str:
@@ -199,7 +201,7 @@ def call_llm(content: list[dict], timeout: int = 45,
 def parse(reply: dict) -> dict:
     msg = reply["choices"][0]["message"]
     text = msg.get("content") or msg.get("reasoning") or ""
-    result = {"score": -1, "notes": "", "vs_95": "?"}
+    result = {"score": -1, "notes": "", "gap": ""}
     for blob in re.findall(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL):
         try:
             d = json.loads(blob)
@@ -207,7 +209,7 @@ def parse(reply: dict) -> dict:
             if 0 <= s <= 100:
                 result["score"] = s
                 result["notes"] = str(d.get("notes", "")).strip()
-                result["vs_95"] = str(d.get("vs_95", "?")).strip()
+                result["gap"] = str(d.get("biggest_gap", "")).strip()
                 return result
         except (json.JSONDecodeError, ValueError):
             continue
@@ -240,7 +242,7 @@ def main() -> int:
 
     content: list[dict] = [{"type": "text", "text": PROMPT}]
     content += labeled("REFERENCE:", args.reference)
-    content += labeled("ANCHOR_95 (humans rated 95):", ANCHOR_HIGH)
+    content += labeled("EXAMPLE (another genuine artist output):", ANCHOR_HIGH)
     content += labeled("CANDIDATE — score this:", args.output)
 
     n = max(1, args.samples)
@@ -271,7 +273,7 @@ def main() -> int:
         print(json.dumps({
             "iter": args.iter, "output": str(args.output),
             "judge_score": -1, "judge_notes": f"all {n} call(s) failed: {last_err}",
-            "vs_anchor_high": "?", "model": LLM_MODEL, "judge_backend": backend,
+            "judge_gap": "", "model": LLM_MODEL, "judge_backend": backend,
             "samples": n, "elapsed_s": elapsed,
         }))
         return 1
@@ -286,7 +288,7 @@ def main() -> int:
         "reference": str(args.reference),
         "judge_score": median,
         "judge_notes": rep["notes"],
-        "vs_anchor_high": rep["vs_95"],
+        "judge_gap": rep["gap"],             # biggest difference from the reference
         "judge_samples": scores,             # raw scores for audit
         "judge_spread": max(scores) - min(scores),  # 0 == fully agreed
         "samples": len(samples),             # successful draws

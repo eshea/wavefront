@@ -63,12 +63,12 @@ one JSON line to `loop/metrics.jsonl` with three numbers per output:
 
 **Before deciding what to try this tick**, run:
 ```
-tail -10 loop/metrics.jsonl | jq -c '{iter, judge_score, ssim, edge_iou, path_fit}'
+tail -10 loop/metrics.jsonl | jq -c '{iter, judge_score, judge_gap, ink_coverage}'
 ```
-to see the recent trajectory. If judge_score has been flat or dropping
-across the last 3-5 ticks, your recent hypotheses aren't working — try
-something qualitatively different (revert to an earlier sweet-spot
-config? change a different parameter?).
+`judge_gap` is the judge's stated **single biggest difference from the
+reference** — this is your steering signal. If judge_score has been flat or
+dropping across the last 3-5 ticks, your hypotheses aren't working — try
+something QUALITATIVELY different (a different idea category, or revert).
 
 Your job: raise the `judge_score` median toward the diamond reference,
 tick by tick. Scores are RELATIVE to the current judge backend — aim to
@@ -82,18 +82,29 @@ loop/metrics.jsonl` after `score_tick.sh` runs.
 
 ---
 
+## THE GOAL: REPLICATE THE ARTIST'S EXAMPLES
+
+The north star is always to make the canonical output **pass for one of the
+artist's own outputs** (`examples/contour_woman_lineart.png` + `post*`): a crisp
+concentric DIAMOND from a center, lines that bend around features, EVEN spacing,
+generous WHITE SPACE, clean linework edge-to-edge. The judge scores closeness to
+that and tells you the `judge_gap`. A good render is ~85; reaching that is the job.
+
 ## BREADTH FIRST — DO NOT HILL-CLIMB
 
 This loop's failure mode is nudging one constant up and down forever. Avoid it:
-- Read **`loop/IDEAS.md`** — a backlog of DIVERSE directions (field formulas,
-  spacing, preprocessing, whole new methods, tests). Each tick pick an idea from
-  a **different category than your last 2 ticks**.
-- Prefer **qualitatively different** experiments over micro-tweaks. Genuinely new
-  algorithms (a new field formula, a new `method=`, a hatching style) and new
+- Steer by the latest **`judge_gap`** (what most differs from the reference), but
+  explore **DIVERSE ways to close it** — not the same knob each time. E.g. if the
+  gap is "no diamond / too dense", a true fix might be a new field formula, a
+  different distance metric, a new `method=`, equalization, or level spacing —
+  try genuinely different ones across ticks.
+- Read **`loop/IDEAS.md`** (backlog of diverse directions). Each tick pick from a
+  **different category than your last 2 ticks**. If the last 3 ticks were the same
+  category, you MUST switch.
+- Genuinely new algorithms (new field, new `method=`, hatching) and new
   **tests/metrics** are HIGH value — do them, not just parameter sweeps.
-- When you have a new thought, **add it to `loop/IDEAS.md`** and mark tried ideas
-  with their result. Breadth of explored ideas matters as much as the best score.
-- If the last 3 ticks were all the same category, you MUST switch categories.
+- When you have a new thought, **add it to `loop/IDEAS.md`**; mark tried ideas with
+  their result. Breadth of explored ideas matters as much as the best score.
 
 ## YOUR JOB THIS TICK
 
