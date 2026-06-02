@@ -84,14 +84,20 @@ while true; do
   # Write iter number so the prompt can pick it up
   printf '%s' "$ITER" > "$ITER_FILE"
 
-  # Invoke Claude with a per-tick wall timeout (macOS has no `timeout`
+  # Invoke the driver with a per-tick wall timeout (macOS has no `timeout`
   # binary by default; emulate by backgrounding and killing).
-  claude -p "$(cat loop/PROMPT.md)" \
-    --model "$MODEL" \
-    --output-format json \
-    --dangerously-skip-permissions \
-    --permission-mode bypassPermissions \
-    > "$log_file" 2> "$txt_file" &
+  #   DRIVER=agent  -> loop/agent.py (local vLLM drives the tick directly)
+  #   DRIVER=claude -> claude -p     (real Claude Code, default)
+  if [ "${DRIVER:-claude}" = "agent" ]; then
+    python loop/agent.py > "$log_file" 2> "$txt_file" &
+  else
+    claude -p "$(cat loop/PROMPT.md)" \
+      --model "$MODEL" \
+      --output-format json \
+      --dangerously-skip-permissions \
+      --permission-mode bypassPermissions \
+      > "$log_file" 2> "$txt_file" &
+  fi
   claude_pid=$!
 
   # Watch for timeout in a subshell that signals the main proc.

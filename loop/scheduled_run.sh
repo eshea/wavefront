@@ -20,17 +20,12 @@ exec > >(tee -a "$LOG") 2>&1
 echo "[scheduled] start $(date '+%Y-%m-%d %H:%M:%S')"
 source .venv/bin/activate
 
-# 1. Route claude -> local LLM via the litellm proxy.
-export ANTHROPIC_BASE_URL="http://localhost:4000"
-export ANTHROPIC_API_KEY="dummy"
-export ANTHROPIC_MODEL="claude-sonnet-4-6"
+# Driver = the local-LLM agent (loop/agent.py), which talks to neuromancer
+# DIRECTLY — no litellm proxy / Claude Code involved. (Claude Code can't be
+# driven by the vLLM: it emits tool calls as text Claude Code won't execute.)
+export DRIVER=agent
 
-# 2. Bring up the litellm proxy (claude -> neuromancer qwen) if not already.
-if ! curl -s --max-time 3 -o /dev/null http://localhost:4000/health/liveliness; then
-  ./loop/litellm.sh start || { echo "[scheduled] FATAL: litellm proxy failed"; exit 1; }
-fi
-
-# 3. Bring up the Flask app (needed by render_tick / holdout).
+# Bring up the Flask app (needed by render_tick / holdout).
 if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5055/ 2>/dev/null)" != "200" ]; then
   PORT=5055 nohup python app.py > loop/log/app_${stamp}.log 2>&1 &
   for i in $(seq 1 20); do
