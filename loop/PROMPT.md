@@ -82,9 +82,22 @@ loop/metrics.jsonl` after `score_tick.sh` runs.
 
 ---
 
+## BREADTH FIRST — DO NOT HILL-CLIMB
+
+This loop's failure mode is nudging one constant up and down forever. Avoid it:
+- Read **`loop/IDEAS.md`** — a backlog of DIVERSE directions (field formulas,
+  spacing, preprocessing, whole new methods, tests). Each tick pick an idea from
+  a **different category than your last 2 ticks**.
+- Prefer **qualitatively different** experiments over micro-tweaks. Genuinely new
+  algorithms (a new field formula, a new `method=`, a hatching style) and new
+  **tests/metrics** are HIGH value — do them, not just parameter sweeps.
+- When you have a new thought, **add it to `loop/IDEAS.md`** and mark tried ideas
+  with their result. Breadth of explored ideas matters as much as the best score.
+- If the last 3 ticks were all the same category, you MUST switch categories.
+
 ## YOUR JOB THIS TICK
 
-Pick **ONE** of these phases based on `loop/EXPERIMENT_LOG.md`:
+Pick **ONE** of these phases based on `loop/EXPERIMENT_LOG.md` and `loop/IDEAS.md`:
 
 ### A. REVIEW (only on tick 1 or when log says "review next")
 - Read the last 3 entries of EXPERIMENT_LOG.md.

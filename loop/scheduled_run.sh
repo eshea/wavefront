@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# loop/scheduled_run.sh — one self-contained unattended ralph run driven ENTIRELY
+# by the local LLM (no Claude Code quota):
+#   - claude -p is routed to the litellm proxy -> neuromancer vLLM (Qwen3.5-122B)
+#   - the visual judge also uses neuromancer (judge.py default)
+#   - caffeinate keeps the Mac awake for the duration
+#
+# Budget (the agreed "short" run; override via env):
+#   DURATION_SEC=5400 (90 min)  MAX_ITERS=30   MODEL=claude-sonnet-4-6 (->qwen)
+#
+# Usage:  ./loop/scheduled_run.sh         (run now)
+# Logs:   loop/log/scheduled_<stamp>.log
+set -u
+cd "$(dirname "$0")/.."
+mkdir -p loop/log
+stamp=$(date '+%Y%m%d-%H%M%S')
+LOG="loop/log/scheduled_${stamp}.log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo "[scheduled] start $(date '+%Y-%m-%d %H:%M:%S')"
+source .venv/bin/activate
+
+# 1. Route claude -> local LLM via the litellm proxy.
+export ANTHROPIC_BASE_URL="http://localhost:4000"
+export ANTHROPIC_API_KEY="dummy"
+export ANTHROPIC_MODEL="claude-sonnet-4-6"
+
+# 2. Bring up the litellm proxy (claude -> neuromancer qwen) if not already.
+if ! curl -s --max-time 3 -o /dev/null http://localhost:4000/health/liveliness; then
+  ./loop/litellm.sh start || { echo "[scheduled] FATAL: litellm proxy failed"; exit 1; }
+fi
+
+# 3. Bring up the Flask app (needed by render_tick / holdout).
+if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5055/ 2>/dev/null)" != "200" ]; then
+  PORT=5055 nohup python app.py > loop/log/app_${stamp}.log 2>&1 &
+  for i in $(seq 1 20); do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5055/ 2>/dev/null)" = "200" ] && break
+    sleep 1
+  done
+fi
+
+# 4. Pre-flight: judge backend reachable?
+curl -s --max-time 5 -o /dev/null -w '[scheduled] neuromancer judge HTTP %{http_code}\n' \
+  http://neuromancer:8000/v1/models || echo "[scheduled] WARN: judge probe failed"
+
+# 5. Run the loop, kept awake by caffeinate. Budget = agreed short run.
+echo "[scheduled] launching ralph (DURATION=${DURATION_SEC:-5400}s MAX_ITERS=${MAX_ITERS:-30})"
+DURATION_SEC="${DURATION_SEC:-5400}" \
+MAX_ITERS="${MAX_ITERS:-30}" \
+MODEL="${MODEL:-claude-sonnet-4-6}" \
+SLEEP_BETWEEN="${SLEEP_BETWEEN:-5}" \
+  caffeinate -i -s ./loop/ralph.sh
+
+echo "[scheduled] done $(date '+%Y-%m-%d %H:%M:%S')"
