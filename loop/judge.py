@@ -51,6 +51,9 @@ from pathlib import Path
 import urllib.request
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import prompts  # noqa: E402  (loop/prompts.py — externalized prompt loader)
+
 
 LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://neuromancer:8000")
 LLM_MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
@@ -124,37 +127,8 @@ ANCHOR_LOW_DESC = (
 )
 
 
-PROMPT = """You are grading WAVEFRONT, an engine that turns a photo into a
-contour-line portrait. Score how closely the CANDIDATE REPLICATES the artist's
-reference style — not merely "is it a contour drawing", but "could it pass for
-one of the artist's OWN outputs?"
-
-THREE images:
-  1. REFERENCE — the artist's actual output for this subject (ignore ink color/paper).
-  2. EXAMPLE — another genuine artist output: the quality bar.
-  3. CANDIDATE — score THIS one.
-
-The reference style you are matching:
-  - a concentric DIAMOND radiating from a center point on the face
-  - lines that BEND smoothly around eyes/nose/mouth but stay continuous
-  - EVEN line spacing across the whole image (near-uniform density)
-  - generous WHITE SPACE between lines — the page reads LIGHT, not dark/busy
-  - clean crisp linework edge-to-edge, with NO dense/smudgy patch and NO blank zone
-
-Score 0–100 by CLOSENESS to that style. BE DISCRIMINATING — do NOT give 90+ just
-because a face is visible, but do NOT dump a clean drawing into the failure tier
-just because the diamond is weak:
-  - 90–100: indistinguishable from an artist output — airy, even spacing, crisp diamond.
-  - 75–89: clearly the right style with a visible flaw (a bit dense / less white space
-    than the reference / slightly uneven / weak diamond but clean lines).
-  - 50–74: recognizable contour portrait with CLEAN lines but missing key style
-    (no clear diamond, OR noticeably too dense/busy, OR flowing-not-concentric).
-  - 1–49: DEGENERATE ONLY — smudgy blob, solid-black mass, blank page, or chaotic
-    scribble with no recognizable face. A clean line drawing is NEVER below 50.
-Most engine outputs are 55–85; reserve 90+ for genuine replication.
-
-Reply with ONLY one JSON object on one line:
-{"score": <int 0-100>, "biggest_gap": "<the single most important difference from the reference to fix next>", "notes": "<=12 words>"}"""
+# The judge rubric lives in loop/prompts/judge.md (load() reloads it live in dev,
+# caches in prod) so it can be prompt-engineered without touching code.
 
 
 def img_to_data_url(path: Path, max_side: int = MAX_SIDE) -> str:
@@ -240,7 +214,7 @@ def main() -> int:
         if not path.exists():
             sys.stderr.write(f"judge.py: missing {name} {path}\n"); return 2
 
-    content: list[dict] = [{"type": "text", "text": PROMPT}]
+    content: list[dict] = [{"type": "text", "text": prompts.load("judge")}]
     content += labeled("REFERENCE:", args.reference)
     content += labeled("EXAMPLE (another genuine artist output):", ANCHOR_HIGH)
     content += labeled("CANDIDATE — score this:", args.output)

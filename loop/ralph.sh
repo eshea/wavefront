@@ -88,7 +88,9 @@ while true; do
   # binary by default; emulate by backgrounding and killing).
   #   DRIVER=agent  -> loop/agent.py (local vLLM drives the tick directly)
   #   DRIVER=claude -> claude -p     (real Claude Code, default)
-  if [ "${DRIVER:-claude}" = "agent" ]; then
+  if [ "${DRIVER:-claude}" = "proposer" ]; then
+    python loop/proposer.py > "$log_file" 2> "$txt_file" &
+  elif [ "${DRIVER:-claude}" = "agent" ]; then
     python loop/agent.py > "$log_file" 2> "$txt_file" &
   else
     claude -p "$(cat loop/PROMPT.md)" \
@@ -136,7 +138,23 @@ while true; do
 
   # Deterministic quality gate: checkpoint engine/ on a good tick, or revert
   # it on a regression. Backstop for when Claude fails to self-revert.
-  ./loop/guard_tick.sh "$ITER" || true
+  guard_out=$(./loop/guard_tick.sh "$ITER" 2>&1 || true); echo "$guard_out"
+
+  # For the proposer driver, append the OFFICIAL score + guard verdict to the
+  # hypothesis entry it wrote (so EXPERIMENT_LOG reads hypothesis -> result).
+  if [ "${DRIVER:-claude}" = "proposer" ]; then
+    GUARD_OUT="$guard_out" python3 - "$ITER" <<'PY' 2>/dev/null || true
+import json, os, sys
+it = int(sys.argv[1])
+rows = [json.loads(l) for l in open("loop/metrics.jsonl") if l.strip()]
+cur = next((r for r in reversed(rows) if r.get("iter") == it), {})
+verdict = "REVERTED" if "FAIL" in os.environ.get("GUARD_OUT", "") else \
+          ("KEPT" if "PASS" in os.environ.get("GUARD_OUT", "") else "?")
+with open("loop/EXPERIMENT_LOG.md", "a") as f:
+    f.write(f"- result: judge={cur.get('judge_score','?')} "
+            f"gap={cur.get('judge_gap','')!r} -> {verdict}\n")
+PY
+  fi
 
   # Periodic holdout overfit-check (renders + judges an unseen image).
   if [ "$HOLDOUT_EVERY" -gt 0 ] && [ $((ITER % HOLDOUT_EVERY)) -eq 0 ]; then

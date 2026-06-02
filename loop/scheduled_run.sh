@@ -20,10 +20,11 @@ exec > >(tee -a "$LOG") 2>&1
 echo "[scheduled] start $(date '+%Y-%m-%d %H:%M:%S')"
 source .venv/bin/activate
 
-# Driver = the local-LLM agent (loop/agent.py), which talks to neuromancer
-# DIRECTLY — no litellm proxy / Claude Code involved. (Claude Code can't be
-# driven by the vLLM: it emits tool calls as text Claude Code won't execute.)
-export DRIVER=agent
+# Driver = the constrained proposer (loop/proposer.py): the harness drives, the
+# local LLM proposes ONE edit per tick. Talks to neuromancer DIRECTLY — no
+# litellm/Claude Code (the vLLM emits tool calls as text Claude Code won't run,
+# and a free agent loop over-works; the proposer is reliable + fast ~10s/tick).
+export DRIVER=proposer
 
 # Bring up the Flask app (needed by render_tick / holdout).
 if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5055/ 2>/dev/null)" != "200" ]; then
