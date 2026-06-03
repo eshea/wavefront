@@ -26,6 +26,7 @@ app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    ├─ engine.field.to_luminance          BT.601 luma
    ├─ field construction (one of):
    │     build_wave_field    method=wave     (ACTIVE — the L1-diamond field the loop tunes)
+   │     march.build_march_field method=march (EXPERIMENTAL — 4-connected marching-waves, see algorithm.md)
    │     build_field        method=contour  (parked baseline — simpler uniform formula)
    │     flow.trace_flow_lines method=flow   (parked experiment)
    ├─ engine.contour.extract_contours    Marching Squares at power-spaced levels

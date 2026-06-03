@@ -39,8 +39,9 @@ from engine.contour import extract_contours, scale_contours  # noqa: E402
 from engine.smooth import smooth_contours  # noqa: E402
 from engine.export import contours_to_svg_string_fast  # noqa: E402
 from engine.flow import trace_flow_lines  # noqa: E402
+from engine.march import build_march_field  # noqa: E402
 
-METHODS = ("contour", "wave", "flow")
+METHODS = ("contour", "wave", "flow", "march")
 
 
 def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
@@ -65,6 +66,8 @@ def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
     else:
         if method == "wave":
             field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix)
+        elif method == "march":
+            field, f_min, f_max = build_march_field(luminance, sx, sy, lum_mix)
         else:
             field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
         contours, stats = extract_contours(field, levels, f_min, f_max)

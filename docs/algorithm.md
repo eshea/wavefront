@@ -162,8 +162,37 @@ baselines/experiments** — summarized at the end, not the canonical path.
 | lum_mix | 0-2 | 1.0 | Strength of luminance warping. |
 | wt_range | 0-1 | 0.6 | Stroke width variation. |
 | seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid. |
-| method | contour/wave/flow | contour | API default; the **ralph loop renders `wave`**. |
+| method | contour/wave/flow/march | contour | API default; the **ralph loop renders `wave`**. |
 | diamond | 0-1 | 0.0 | `wave` only — maps to `WAVE_DIAMOND` if sent. |
+
+## Experimental: method=march (marching waves)
+
+`method=march` (`engine/march.py:build_march_field`) is a new, distinct field
+still under evaluation — it shares Steps 1, 4–7 and only swaps Step 3. It models
+CONTOUR-V's "marching waves": a seed emits a wavefront whose local SPEED is set by
+the image, and the plotted lines are equal-arrival-time fronts.
+
+It is a **4-connected weighted distance** (`skimage.graph.MCP`,
+`fully_connected=False`), whose geodesic is L1 (Manhattan) → concentric DIAMONDS.
+MCP accumulates COST (≈ 1/speed), so dark/edges = HIGH cost (the wave crawls →
+isolines bunch → denser lines; "the visor goes black"):
+
+    gray = percentile_normalize -> blur -> contrast -> gamma   (engine/march.py)
+    dark = 1 - gray ;  edge = normalized |grad(gray)|
+    cost = MARCH_BASE + MARCH_TONE*lum_mix*dark + MARCH_EDGE*edge
+    field = MCP(cost, 4-connected).find_costs(seed)            # arrival time
+    contours = extract_contours(field, levels)                 # same downstream
+
+`MARCH_BASE` is the diamond-dominance knob: high ⇒ crisp diamonds barely bent by
+the image (face fades); low (≈1) ⇒ image strongly bends/bunches the diamonds
+(strong feature definition, denser). Other knobs: `MARCH_TONE` (dark density),
+`MARCH_EDGE` (edge deflection/bunching), `MARCH_GAMMA`/`MARCH_CONTRAST`/`MARCH_BLUR`
+(tone preprocessing), `MARCH_NORM_LO/HI` (percentile normalize).
+
+**Why 4-connectivity (not a true eikonal):** an isotropic fast-marching eikonal
+(scikit-fmm) was tried earlier and abandoned — its round fronts globally rerouted
+into horizontal bands. The 4-connected L1 topology is constrained: tone/edges bend
+and bunch the diamonds locally but cannot reroute them into bands.
 
 ## Parked baselines (not the active path)
 

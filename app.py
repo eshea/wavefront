@@ -18,8 +18,9 @@ from engine.contour import extract_contours, scale_contours
 from engine.smooth import smooth_contours
 from engine.export import contours_to_svg_string_fast
 from engine.flow import trace_flow_lines
+from engine.march import build_march_field
 
-METHODS = ('contour', 'wave', 'flow')  # contour = classic isolines (default)
+METHODS = ('contour', 'wave', 'flow', 'march')  # contour = classic isolines (default)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max upload
@@ -150,6 +151,8 @@ def process():
         else:
             if method == 'wave':
                 field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix, diamond)
+            elif method == 'march':
+                field, f_min, f_max = build_march_field(luminance, sx, sy, lum_mix)
             else:
                 field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
             contours, stats = extract_contours(field, levels, f_min, f_max)
