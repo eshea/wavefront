@@ -41,6 +41,8 @@ trap 'rm -f "$tmp"' EXIT
 for f in loop/output/iter_*.png; do
   [ -f "$f" ] || continue
   n=$(basename "$f" .png | sed 's/iter_//; s/^0*//')
+  # Skip non-numeric iters (e.g. iter_baseline.png) — judge.py --iter wants an int.
+  case "$n" in (''|*[!0-9]*) continue;; esac
   if ! python loop/judge.py --output "$f" --reference "$REF" --iter "$n" 2>/dev/null >> "$tmp"; then
     echo "[iter014_anchor] judge failed for $f  FAIL"
     exit 1

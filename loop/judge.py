@@ -172,16 +172,60 @@ def call_llm(content: list[dict], timeout: int = 45,
         return json.loads(resp.read())
 
 
+_CHECK_KEYS = ("face", "diamond", "even_white", "clean")
+
+
+def _as_bool(v):
+    """Coerce a JSON value to bool; return None if it isn't clearly boolean."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("true", "yes", "y", "1"):
+            return True
+        if s in ("false", "no", "n", "0"):
+            return False
+    return None
+
+
+def band_clamp(score: int, checks: dict) -> int:
+    """Clamp the model's score into the band implied by its yes/no checklist, so
+    the number is reproducible from the checks (Qwen's free-form score is noisy).
+
+    Bands mirror loop/prompts/judge.md. Applied only when ALL four checks are
+    present; otherwise the raw score is returned unchanged.
+    """
+    vals = [checks.get(k) for k in _CHECK_KEYS]
+    if any(v is None for v in vals):
+        return score
+    face, diamond, even_white, clean = vals
+    if not face:
+        lo, hi = 1, 35
+    elif not diamond:
+        lo, hi = 36, 55
+    elif not even_white:
+        lo, hi = 50, 70
+    elif not clean:
+        lo, hi = 71, 85
+    else:
+        lo, hi = 86, 100
+    return max(lo, min(hi, score))
+
+
 def parse(reply: dict) -> dict:
     msg = reply["choices"][0]["message"]
     text = msg.get("content") or msg.get("reasoning") or ""
-    result = {"score": -1, "notes": "", "gap": ""}
+    result = {"score": -1, "notes": "", "gap": "", "checks": {}}
     for blob in re.findall(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL):
         try:
             d = json.loads(blob)
             s = int(d.get("score", -1))
             if 0 <= s <= 100:
-                result["score"] = s
+                checks = {k: _as_bool(d.get(k)) for k in _CHECK_KEYS}
+                result["score"] = band_clamp(s, checks)
+                result["checks"] = checks
                 result["notes"] = str(d.get("notes", "")).strip()
                 result["gap"] = str(d.get("biggest_gap", "")).strip()
                 return result
@@ -263,6 +307,7 @@ def main() -> int:
         "judge_score": median,
         "judge_notes": rep["notes"],
         "judge_gap": rep["gap"],             # biggest difference from the reference
+        "judge_checks": rep.get("checks", {}),  # face/diamond/even_white/clean (audit)
         "judge_samples": scores,             # raw scores for audit
         "judge_spread": max(scores) - min(scores),  # 0 == fully agreed
         "samples": len(samples),             # successful draws

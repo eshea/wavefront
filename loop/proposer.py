@@ -67,13 +67,20 @@ def recent_metrics(n=6):
 
 
 ACTIVE_NOTE = """# ACTIVE SURFACE — what actually affects the scored render
-The canonical render uses **method=contour**, so ONLY these change the output:
-  - engine/field.py  -> build_field()  + its constants FIELD_DENOISE_SIGMA, FIELD_SHADOW_LIFT
-  - engine/contour.py -> THRESHOLD_POWER  (and the compute_thresholds formula)
-  - the render also passes lum_mix=0.8.
-IGNORE the WAVE_* constants, build_wave_field(), and engine/flow.py — those are
-PARKED experiments (method=wave/flow), NOT rendered. Editing them does NOTHING.
-Edit build_field / its constants / THRESHOLD_POWER, or add a new test."""
+The canonical render uses **method=wave** (build_wave_field, the L1-diamond
+field), so ONLY these constants change the output:
+  - engine/field.py  -> build_wave_field()'s knobs:
+      WAVE_DIAMOND   (0=full luminance ripple, 1=ignore the face -> crisp diamonds)
+      WAVE_RELIEF    (luminance ripple amplitude; low => diamonds dominate)
+      WAVE_SIGMA_FACE(blur near the seed; lower => more feature wrap)
+      WAVE_SIGMA_BG  (blur far from the seed; higher => calmer background)
+      WAVE_FAR       (far-field ripple multiplier; lower => cleaner bg diamonds)
+      WAVE_INNER / WAVE_OUTER (face vs background zone radii, fraction of min(W,H))
+  - engine/contour.py -> THRESHOLD_POWER  (level spacing; 1.0 = even spacing)
+  - the render also passes lum_mix=0.8 (scales the wave relief).
+IGNORE FIELD_DENOISE_SIGMA, FIELD_SHADOW_LIFT, build_field(), and engine/flow.py
+— those are PARKED experiments (method=contour/flow), NOT rendered. Editing them
+does NOTHING. Edit a WAVE_* constant or THRESHOLD_POWER (one per tick)."""
 
 
 def build_user_text():

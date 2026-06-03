@@ -49,3 +49,11 @@ loop/holdout/output_*
 # (loop/judge.py loads it as ANCHOR_95), not a regenerable output. The parent
 # dir is matched by a glob (not a dir-ignore) so this negation can take effect.
 !loop/output/iter_014.png
+
+# Sweep experiments are throwaway exploration — keep them OUT of git (regenerable
+# locally; the substantive outcome is baked into engine defaults + render_tick).
+loop/sweep.py
+loop/sweep_results.jsonl
+loop/WAVE_SWEEP.md
+loop/sweep_best.png
+loop/sweep_best.svg

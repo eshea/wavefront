@@ -17,27 +17,30 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/contour_woman.webp` | `examples/contour_woman_lineart.png` (clean diamond line-art; also `contour_woman_post*`) | centered seed, levels 65, method=contour |
+| `examples/contour_woman.webp` | `examples/contour_woman_lineart.png` (clean diamond line-art; also `contour_woman_post*`) | centered seed, levels 65, method=wave |
 
 The woman is the **canonical test**, baked into `loop/render_tick.sh` +
 `loop/score_tick.sh`. Also study the new style references in `examples/`
 (the blue VEX-LINE face, `Screenshot ... CONTOUR-V CORE`, Motoko) with
 the Read tool — they are output-only (no inputs), pure visual targets.
 
-### WHAT YOU ARE TUNING NOW: the uniform CONTOUR field (`build_field`)
-The canonical render uses **`method=contour`** (`render_tick.sh`), the
-reverse-engineered formula applied UNIFORMLY:
-`field = (|x-sx|+|y-sy|) + (255 - lum_pre)·lum_mix`. Concentric **diamonds**
-(Manhattan dist) warped by luminance to follow the face, with EVEN line
-spacing and clean white space — consistent from the seed to the image
-edges (no circular zone). Your knobs:
-- `engine/field.py`: `FIELD_DENOISE_SIGMA` (uniform blur — tame busy texture),
-  `FIELD_SHADOW_LIFT` (raise darks so makeup/shadow don't pile into a blob).
-- `engine/contour.py`: `THRESHOLD_POWER` (1.0 = linear/even; >1 densifies face).
-- render params: `lum_mix` (luminance warp strength), `levels`.
-Tune ONE per tick. Do NOT re-introduce an adaptive/zoned blur — the old
-radial "ring" at ~20-35% was a bug (not in the real tool). `method=wave`
-and `method=flow` are parked experiments; leave them.
+### WHAT YOU ARE TUNING NOW: the WAVE / L1-diamond field (`build_wave_field`)
+The canonical render uses **`method=wave`** (`render_tick.sh`): an L1 (Manhattan)
+distance base that dominates the gradient — giving crisp concentric **diamonds**
+that stay topologically intact everywhere — plus a GENTLE luminance relief so the
+diamonds ripple around eyes/nose/mouth without breaking into closed loops. The
+relief is suppressed far from the seed so hair/background render as clean
+diamonds, not dense texture. Aim for EVEN line spacing and generous white space.
+Your knobs (all in `engine/field.py` unless noted):
+- `WAVE_DIAMOND` — 0 = full ripple, 1 = ignore the face (pure crisp diamonds).
+- `WAVE_RELIEF` — luminance ripple amplitude; low => diamonds dominate.
+- `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG` — luminance blur near / far from the seed.
+- `WAVE_FAR` — far-field ripple multiplier; low => clean background diamonds.
+- `WAVE_INNER` / `WAVE_OUTER` — face vs background zone radii (fraction of min(W,H)).
+- `engine/contour.py`: `THRESHOLD_POWER` (1.0 = linear/even spacing; >1 densifies).
+- render params: `lum_mix` (scales the relief), `levels`.
+Tune ONE per tick. `method=contour` (`build_field`) and `method=flow` are parked
+experiments; leave them and their constants (FIELD_*) alone.
 
 **HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
 `loop/holdout/contour_space_post.webp` are the held-out test set. Do
@@ -197,7 +200,7 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (woman, centered seed, levels 65, method=contour)
+**Test:** canonical (woman, centered seed, levels 65, method=wave)
 - output: `loop/output/iter_NNN.svg` ({stats})
 - reference: `examples/contour_woman_lineart.png`
 - visual comparison: {what you saw — be specific}

@@ -109,17 +109,23 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
 
 # --- Tunable knobs for the wave (L1-diamond) field. The ralph loop edits these
 # the same way it edits engine/contour.py's power=2.7. ---
-WAVE_DIAMOND = 0.0      # extra crisp-diamond bias: 0 = full ripple, 1 = ignore the face
-WAVE_RELIEF = 0.45      # luminance ripple amplitude (× lum_mix). Low => diamonds dominate
+# NOTE on the zone radii: INNER/OUTER are deliberately WIDE so the relief grades
+# smoothly from the seed all the way past the image corners — this dissolves the
+# visible "limited circle" boundary the narrow (0.20/0.42) zone produced, giving a
+# near-uniform field while still easing relief outward (a narrow zone, e.g. the
+# old 0.20/0.42, made the relief fall off across a visible circle).
+WAVE_DIAMOND = 0.12     # extra crisp-diamond bias: 0 = full ripple, 1 = ignore the face
+WAVE_RELIEF = 0.65      # luminance ripple amplitude (× lum_mix). Low => diamonds dominate
 WAVE_SIGMA_FACE = 8.0   # luminance blur near the seed (preserves feature wrap)
 WAVE_SIGMA_BG = 30.0    # luminance blur far from the seed (suppresses hair/bg texture)
-WAVE_FAR = 0.20         # far-field ripple multiplier (low => clean background diamonds)
-WAVE_INNER = 0.20       # face zone radius (fraction of min(W,H))
-WAVE_OUTER = 0.42       # background zone radius (fraction of min(W,H))
+WAVE_FAR = 0.35         # far-field ripple multiplier (low => clean bg; raised so the
+                        # background still ripples -> no abrupt circle edge)
+WAVE_INNER = 0.10       # relief-fade inner radius (fraction of min(W,H)) — starts near seed
+WAVE_OUTER = 0.90       # relief-fade outer radius — wide, so the fade reaches past corners
 
 
 def build_wave_field(luminance, seed_x, seed_y, lum_mix=1.0, diamond=None,
-                     relief=WAVE_RELIEF, far=WAVE_FAR):
+                     relief=None, far=None):
     """Wave/diamond field: an L1 (Manhattan) distance dominated by geometry, with
     a GENTLE luminance relief so the diamonds ripple around features.
 
@@ -139,7 +145,12 @@ def build_wave_field(luminance, seed_x, seed_y, lum_mix=1.0, diamond=None,
     diamond (0..1) biases toward pure crisp diamonds; relief scales the ripple.
     Returns the same (field, field_min, field_max) tuple as build_field.
     """
+    # Read the WAVE_* knobs from module globals at call time (NOT as default args,
+    # which would freeze them at import — so editing the constants would silently
+    # do nothing). Explicit caller-passed values still override.
     d = WAVE_DIAMOND if diamond is None else float(np.clip(diamond, 0.0, 1.0))
+    relief = WAVE_RELIEF if relief is None else relief
+    far = WAVE_FAR if far is None else far
     H, W = luminance.shape
 
     # Adaptive luminance blur: light near the seed (keep feature detail), heavy
