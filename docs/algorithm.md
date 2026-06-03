@@ -1,9 +1,24 @@
 # WAVEFRONT Algorithm Documentation
 
+This documents the **active `method=wave` path** (`engine.field.build_wave_field`),
+the L1-diamond field WAVEFRONT now uses to replicate CONTOUR-V CORE. See
+`contour-v-core-source.md` for the replication target. The shared pipeline
+(preprocess → extract → smooth → scale → export) is the same for every method;
+only field construction (Step 3) differs. `method=contour` (`build_field`, the
+simpler uniform formula) and `method=flow` (`engine.flow`) are **parked
+baselines/experiments** — summarized at the end, not the canonical path.
+
+> **History note.** Earlier versions used an *adaptive / zoned* luminance blur
+> that imposed a circular "ring" at ~20–35% radius, plus a steep
+> `THRESHOLD_POWER` (~2.7) that crammed most levels near the seed. Both were
+> **bugs** — the target's field has near-even line spacing and no circular zone.
+> They were removed. Ignore any lingering references to adaptive blur.
+
 ## Pipeline Overview
 
-  Image -> processing resize + original size retained -> luminance -> adaptive blur
-  -> scalar field -> Marching Squares paths -> Chaikin smoothing
+  Image -> processing resize + original size retained -> luminance
+  -> uniform preprocessing (denoise + shadow-lift) -> scalar field
+  -> Marching Squares paths -> Chaikin smoothing
   -> original-size coordinate scaling -> SVG
 
 ## Step 1: Image Preprocessing
@@ -21,56 +36,66 @@
      L[y,x] = 0.299 * R + 0.587 * G + 0.114 * B
      (ITU-R BT.601 standard)
 
-## Step 2: Adaptive Luminance Blur
+## Step 2: Adaptive Luminance Blur (zoned by seed distance)
 
-  Two blurred luminance maps are built:
+  The wave field blurs luminance differently near vs. far from the seed — light
+  blur near the face preserves feature wrap, heavy blur in the background kills
+  hair/texture. All constants live in `engine/field.py`:
 
-    L_light = gaussian_filter(L, sigma=8)
-    L_heavy = gaussian_filter(L, sigma=30)
+    L_light = gaussian_filter(L, sigma=WAVE_SIGMA_FACE)   # default 8.0
+    L_heavy = gaussian_filter(L, sigma=WAVE_SIGMA_BG)     # default 30.0
 
-  A distance blend chooses how much of each blur to use:
+    dist    = sqrt((x-sx)^2 + (y-sy)^2)
+    inner   = WAVE_INNER * min(W, H)      # default 0.10
+    outer   = WAVE_OUTER * min(W, H)      # default 0.90
+    dw      = clamp((dist - inner) / (outer - inner), 0, 1)   # 0=face .. 1=bg
+    L_blend = (1 - dw) * L_light + dw * L_heavy
 
-    dist_to_seed = sqrt((x - sx)^2 + (y - sy)^2)
-    inner_r = 0.20 * min(width, height)
-    outer_r = 0.35 * min(width, height)
-    dist_weight = clamp((dist_to_seed - inner_r) / (outer_r - inner_r), 0, 1)
+  IMPORTANT — keep the zone WIDE. `inner`/`outer` are set so the fade spans from
+  near the seed to *past the image corners* (corner dist ≈ 0.71·min(W,H) for a
+  centered seed, well inside outer=0.90). A narrow zone (the old 0.20/0.42) made
+  the relief fall off across a visible circle — the "limited circle vs uniform"
+  artifact. Widening it (plus a non-trivial `WAVE_FAR`, Step 3) dissolves that
+  boundary into a smooth, near-uniform gradient.
 
-    L_blur = (1 - dist_weight) * L_light + dist_weight * L_heavy
+## Step 3: Wave / L1-Diamond Field Construction (active — `build_wave_field`)
 
-  Near the seed, lighter blur preserves facial features. Farther away, heavier
-  blur suppresses hair/background texture so contours remain open and flowing.
+  The signature CONTOUR-V geometry: a Manhattan (L1) distance base that dominates
+  the gradient — giving crisp concentric **diamonds** that stay topologically
+  intact everywhere — plus a GENTLE luminance relief so the diamonds ripple
+  around features without breaking into closed loops.
 
-## Step 3: Scalar Field Construction
+    l1      = abs(x - sx) + abs(y - sy)              # L1 diamond base (px)
+    relief_w= (1 - dw) * 1.0 + dw * WAVE_FAR         # fade relief into the bg
+    ripple  = (255 - L_blend) * WAVE_RELIEF * lum_mix * (1 - WAVE_DIAMOND) * relief_w
+    field[y,x] = l1 + ripple
 
-  The base field uses Manhattan distance, which produces diamond/ring geometry:
+  Manhattan (L1) distance — NOT Euclidean — is what produces the diamonds
+  (Euclidean would give circles; older notes that hypothesize `sqrt(...)` for the
+  base are superseded). Knobs and their effect:
+  - `WAVE_DIAMOND` (0–1): biases toward pure crisp diamonds; 1 ignores the face.
+  - `WAVE_RELIEF`: luminance ripple amplitude — low keeps diamonds dominant.
+  - `WAVE_FAR`: far-field ripple multiplier — low gives clean background diamonds.
+  - `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG`, `WAVE_INNER` / `WAVE_OUTER`: see Step 2.
+  - `lum_mix` (clamped 0–2 by the API) scales the relief; the loop renders at 0.8.
 
-    dist_field = abs(x - sx) + abs(y - sy)
-
-  The luminance contribution is reduced away from the seed:
-
-    effective_lum_mix = lum_mix * ((1 - dist_weight) * 1.0 + dist_weight * 0.70)
-    lum_field = (255 - L_blur) * effective_lum_mix
-
-  Final field:
-
-    field[y,x] = dist_field + lum_field
-
-  Properties:
-  - Dark pixels raise the field and pull isolines tighter.
-  - Bright pixels add little or no luminance warp.
-  - Far-field texture still affects the lines, but at lower strength.
-  - `lum_mix` is clamped to 0-2 by the Flask API and UI.
+  Because the L1 base dominates and the relief is bounded + suppressed far from
+  the seed, rings stay continuous and the page stays light and even — the target
+  look (vs. `build_field`, whose full-strength uniform warp over-densifies the
+  face into a smudge; see the baselines note below).
 
 ## Step 4: Isoline Extraction
 
-  For N levels, compute power-spaced thresholds:
+  For N levels, compute power-spaced thresholds (`THRESHOLD_POWER` in
+  `engine/contour.py`, currently ~1.3; the ralph loop tunes it):
 
     frac[i] = i / (N + 1), for i in 1..N
-    threshold[i] = field_min + frac[i]^2.7 * (field_max - field_min)
+    threshold[i] = field_min + frac[i]^THRESHOLD_POWER * (field_max - field_min)
 
-  Power spacing concentrates more contours near low field values around the
-  seed and leaves fewer levels in the far background. This matches the desired
-  dense-face / sparse-background distribution better than linear spacing.
+  THRESHOLD_POWER = 1.0 is linear = even line spacing, which matches the
+  reference's near-uniform density. Values >1 concentrate levels near the seed
+  (denser face). The old 2.7 put ~77% of levels near the seed and over-densified
+  the face — it was tuned down toward linear to match the target.
 
   Each threshold is passed to:
 
@@ -137,6 +162,22 @@
 | lum_mix | 0-2 | 1.0 | Strength of luminance warping. |
 | wt_range | 0-1 | 0.6 | Stroke width variation. |
 | seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid. |
+| method | contour/wave/flow | contour | API default; the **ralph loop renders `wave`**. |
+| diamond | 0-1 | 0.0 | `wave` only — maps to `WAVE_DIAMOND` if sent. |
+
+## Parked baselines (not the active path)
+
+Two other field methods exist behind `method=`; they share Steps 1, 4–7 and only
+swap Step 3. They are not actively tuned — left for comparison/experiment.
+
+- **`method=contour` (`build_field`)** — the simpler reverse-engineered formula,
+  applied UNIFORMLY: `field = (|x-sx|+|y-sy|) + (255 - L_pre)·lum_mix`, where
+  `L_pre` is luminance after a uniform Gaussian denoise (`FIELD_DENOISE_SIGMA`)
+  and shadow-lift (`FIELD_SHADOW_LIFT`). Correct diamonds, but the full-strength
+  uniform warp tends to over-densify the face into a smudge — which is why the
+  wave field (bounded, seed-faded relief) became the active method.
+- **`method=flow` (`engine/flow.py`)** — evenly-spaced gradient streamlines
+  (Jobard & Lefebvre); a fundamentally different, hair-like aesthetic.
 
 Malformed numeric values return HTTP 400. Out-of-range numeric values are
 clamped to the ranges above.

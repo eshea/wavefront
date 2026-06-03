@@ -1,5 +1,16 @@
 # WAVEFRONT Research Notes
 
+> **Status / correction.** These are early notes. Two things are now settled and
+> should be read in light of them — see `contour-v-core-source.md` for the
+> verified first-party facts (Ko-fi product page, demo video, Reddit post):
+>
+> 1. **Distance is Manhattan (L1), not Euclidean.** The signature concentric
+>    *diamonds* come from `|x-sx| + |y-sy|`. The `sqrt(...)` formula and the
+>    T-RANGE diagonal coincidences below are superseded by the L1 model in
+>    `algorithm.md`; the diagonal-length match was a numeric coincidence.
+> 2. The tool is **CONTOUR-V CORE** by **Robert T Wilson** (VEX-LINE), a single
+>    standalone HTML file with two sliders (CONTOURS, LINE SMOOTH) + seed.
+
 ## Origin: VEX-LINE Artist
 
 VEX-LINE is a plotter artist who creates large-format topographic contour portraits on paper using pen plotters. The works feature:

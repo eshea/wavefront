@@ -1,5 +1,12 @@
 # VEX ENGINE Reverse Engineering Log
 
+> **See `contour-v-core-source.md` first** — it holds the verified first-party
+> facts (Ko-fi product copy, the official demo video, the Reddit JS-loop-fix
+> post). This log is the working notes that fed into it. One correction carried
+> through to the engine: the distance metric is **Manhattan (L1)**, producing
+> diamonds — the Euclidean `sqrt` in the formula-derivation section below is
+> superseded (see `algorithm.md`).
+
 ## Source Material
 
 - Reddit post: r/ClaudeAI — artist sharing VEX ENGINE, described Claude helping fix bugs
