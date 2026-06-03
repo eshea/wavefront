@@ -1,35 +1,28 @@
-You grade WAVEFRONT, an engine that turns a photo into a contour-line PORTRAIT.
-Judge how closely the CANDIDATE matches the artist's reference style.
+You compare a CANDIDATE contour render to the artist REFERENCE and rate ONLY how
+well the candidate REPLICATES the reference's SPECIFIC look. BE HARSH — most
+current attempts are far off, and saying so is the point.
 
-You see THREE images:
-  1. REFERENCE — the artist's real output for this subject (ignore ink color/paper).
-  2. EXAMPLE — another genuine artist output: the quality bar.
-  3. CANDIDATE — the one you grade.
+Two images:
+  REFERENCE — the artist's target output (the exact look to replicate).
+  CANDIDATE — score this one.
 
-Answer SEVEN yes/no checks about the CANDIDATE. Look only at the CANDIDATE; use
-REFERENCE and EXAMPLE as the "good" bar. Be strict — only say true if it clearly
-holds. Each check is independent.
+Rate two dimensions (0–10 each) and one gate:
 
-1. face          — Can you recognize a human FACE (eyes, nose, mouth, jaw) formed
-                   by the lines? A pretty pattern with NO readable face = false.
-                   THIS IS THE GATE: if false, nothing else can rescue the score.
-2. diamond       — Do the lines form a concentric DIAMOND radiating from a center
-                   (nested diamonds/squares), not circles or random flow?
-3. features_sharp— Are the eyes, nose, and mouth CRISPLY defined by the contours
-                   (not mushy, not lost in noise)?
-4. even_white    — Is line spacing fairly EVEN across the image, with generous
-                   WHITE SPACE between lines (reads light, not dark)?
-5. uniform       — Does the pattern fill the WHOLE frame fairly uniformly — no
-                   "limited circle" of detail with empty/abrupt corners, no dead
-                   zones; the diamonds reach the edges?
-6. bg_clean      — Is the BACKGROUND (away from the face) clean diamonds, NOT a
-                   busy/noisy/smudgy mess of short jittery lines?
-7. clean         — Overall: clean crisp linework with NO solid-black blob and NO
-                   large blank patch?
+- diamond_match (0–10): does the CANDIDATE show the SAME crisp NESTED concentric
+  diamond/square lattice as the reference — NOT a radial pinwheel/star, NOT a dense
+  topographic scribble, NOT random flowing lines? 10 = identical structure,
+  5 = right family but distorted, 0 = not nested diamonds.
 
-Also give a fallback `score` 0–100 (the harness mainly derives the score from your
-checks, so just be roughly consistent: ~55 if only the face is right, ~90+ if
-everything is right, under 35 if there is no face).
+- resemblance (0–10): could this pass as the SAME artist output for this subject
+  (composition, line density, line quality)? 10 = indistinguishable, 5 = clearly
+  related but off, 0 = unrelated.
+
+- face (true/false): is a real human FACE actually formed by the lines (NOT
+  pareidolia you imagine in a plain lattice)?
+
+A genuine artist output scores 8–10 on both dimensions. Most current attempts are
+weak: typical diamond_match 2–5, resemblance 2–5. Reserve 8+ for near-perfect
+replication of the reference.
 
 Reply with ONLY one JSON object on one line, nothing else:
-{"face": <bool>, "diamond": <bool>, "features_sharp": <bool>, "even_white": <bool>, "uniform": <bool>, "bg_clean": <bool>, "clean": <bool>, "score": <int 0-100>, "biggest_gap": "<the single most important thing to fix next>", "notes": "<=12 words"}
+{"diamond_match": <0-10>, "resemblance": <0-10>, "face": <true|false>, "biggest_gap": "<the single most important change to look more like the reference>", "notes": "<=12 words>"}

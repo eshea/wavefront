@@ -172,15 +172,15 @@ def call_llm(content: list[dict], timeout: int = 45,
         return json.loads(resp.read())
 
 
-# Face is the gate; the remaining checks each carry weight toward the score. The
-# weighted sum gives FINE resolution (many distinct totals) so two "good" renders
-# differentiate — unlike the old 5-band rubric that saturated everything at ~92.
-_CHECK_KEYS = ("face", "diamond", "features_sharp", "even_white",
-               "uniform", "bg_clean", "clean")
-_SECONDARY_WEIGHTS = {
-    "diamond": 0.20, "features_sharp": 0.18, "even_white": 0.16,
-    "uniform": 0.16, "clean": 0.16, "bg_clean": 0.14,            # sum = 1.00
-}
+# Reference-replication rubric (loop/prompts/judge.md): the model rates two graded
+# dimensions 0-10 — diamond_match (same nested-diamond lattice as the reference) and
+# resemblance (could pass as the artist's own output) — plus a face gate. The score
+# is derived deterministically so it's reproducible at temp 0. This is deliberately
+# HARSH and reference-calibrated: a real artist output scores ~85-100, current
+# attempts ~0-25, so there is real headroom and the loop has a gradient to climb
+# (the old saturating checklist rated every decent render ~92-100, which was useless).
+_DIM_KEYS = ("diamond_match", "resemblance")
+_FACE_CAP = 25   # no real face -> score can't exceed this (kills faceless lattices)
 
 
 def _as_bool(v):
@@ -198,38 +198,47 @@ def _as_bool(v):
     return None
 
 
-def score_from_checks(checks: dict):
-    """Deterministic score from the yes/no checklist (loop/prompts/judge.md).
-
-    face is a hard gate. With a face, score = 55 + 45·(weighted fraction of the
-    secondary checks that passed) -> 55 (face only) .. 100 (all). Without a face,
-    score = min(35, 15 + 20·frac). Returns None if `face` is absent (caller then
-    falls back to the model's own score). Missing secondary checks count as False.
-    """
-    face = checks.get("face")
-    if face is None:
+def _as_unit10(v):
+    """Coerce to an int in [0, 10]; None if not a number."""
+    try:
+        return max(0, min(10, int(round(float(v)))))
+    except (TypeError, ValueError):
         return None
-    passed = sum(w for k, w in _SECONDARY_WEIGHTS.items() if checks.get(k) is True)
-    frac = passed / sum(_SECONDARY_WEIGHTS.values())
-    if not face:
-        return int(round(min(35.0, 15.0 + 20.0 * frac)))
-    return int(round(55.0 + 45.0 * frac))
+
+
+def score_from_checks(checks: dict):
+    """Deterministic score from the reference-replication dims (loop/prompts/judge.md).
+
+    score = (diamond_match + resemblance) / 20 * 100, then capped at _FACE_CAP when
+    no real face is present. Returns None if a dimension is missing (caller falls
+    back to any raw model score).
+    """
+    dm = checks.get("diamond_match")
+    rs = checks.get("resemblance")
+    if dm is None or rs is None:
+        return None
+    score = int(round((dm + rs) / 20.0 * 100.0))
+    if checks.get("face") is False:
+        score = min(score, _FACE_CAP)
+    return max(0, min(100, score))
 
 
 def parse(reply: dict) -> dict:
     msg = reply["choices"][0]["message"]
     text = msg.get("content") or msg.get("reasoning") or ""
     result = {"score": -1, "notes": "", "gap": "", "checks": {}}
-    for blob in re.findall(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL):
+    # Match any flat JSON object that carries one of our dimension keys.
+    for blob in re.findall(r"\{[^{}]*(?:diamond_match|resemblance|score)[^{}]*\}", text, re.DOTALL):
         try:
             d = json.loads(blob)
         except json.JSONDecodeError:
             continue
-        checks = {k: _as_bool(d.get(k)) for k in _CHECK_KEYS}
+        checks = {k: _as_unit10(d.get(k)) for k in _DIM_KEYS}
+        checks["face"] = _as_bool(d.get("face"))
         derived = score_from_checks(checks)
-        if derived is not None:                 # checklist present -> authoritative
+        if derived is not None:                 # rubric dims present -> authoritative
             result["score"] = derived
-        else:                                   # no booleans -> fall back to model score
+        else:                                   # no dims -> fall back to a raw model score
             try:
                 s = int(d.get("score", -1))
             except (TypeError, ValueError):
@@ -257,23 +266,24 @@ def main() -> int:
     p.add_argument("--iter", type=int, default=None)
     p.add_argument("--samples", type=int, default=1,
                    help="number of judge calls (median reported). DEFAULT 1 is a "
-                        "single temperature-0 read: the checklist score "
+                        "single temperature-0 read: the rubric score "
                         "(score_from_checks) is DETERMINISTIC, so one read is "
                         "stable and reproducible. N>1 draws at temp>0 and only "
-                        "INJECTS noise (the boolean checks flip between draws) — "
+                        "INJECTS noise (the ratings drift between draws) — "
                         "leave it at 1 unless debugging.")
     args = p.parse_args()
 
     for path, name in [(args.output, "output"),
-                       (args.reference, "reference"),
-                       (ANCHOR_HIGH, "anchor_high")]:
+                       (args.reference, "reference")]:
         if not path.exists():
             sys.stderr.write(f"judge.py: missing {name} {path}\n"); return 2
 
+    # Two images only: the rubric is a DIRECT candidate-vs-reference comparison.
+    # (Adding a third "example" image diluted the comparison and wasn't needed —
+    # real artist outputs still score 85-100 against the reference alone.)
     content: list[dict] = [{"type": "text", "text": prompts.load("judge")}]
-    content += labeled("REFERENCE:", args.reference)
-    content += labeled("EXAMPLE (another genuine artist output):", ANCHOR_HIGH)
-    content += labeled("CANDIDATE — score this:", args.output)
+    content += labeled("REFERENCE (the target to replicate):", args.reference)
+    content += labeled("CANDIDATE (score this):", args.output)
 
     n = max(1, args.samples)
     # temp 0 = deterministic. The checklist score is computed from the booleans,

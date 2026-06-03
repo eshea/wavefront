@@ -54,13 +54,14 @@ After each tick, `loop/score_tick.sh` runs automatically and appends
 one JSON line to `loop/metrics.jsonl` with three numbers per output:
 
 - `judge_score` (0–100, **primary metric**) — a single DETERMINISTIC temp-0
-  read from a local vision model (`judge.py`). The score is computed from a
-  yes/no checklist (face/diamond/features_sharp/even_white/uniform/bg_clean/
-  clean) via `score_from_checks`, so it is stable and reproducible. Higher =
-  better; `judge_checks` shows which criteria passed. NOTE the scale depends on
-  `judge_backend`; compare ticks only within the SAME backend. The judge
-  reliably separates broken from good but CANNOT finely rank two already-good
-  renders — use the pixel co-signals + your eyes for fine calls.
+  read from a local vision model (`judge.py`) that directly compares the render
+  to the REFERENCE. The score is derived from two harsh 0–10 ratings —
+  `diamond_match` (same nested-diamond lattice as the reference) and
+  `resemblance` (could it pass as the artist's own output) — plus a `face` gate,
+  via `score_from_checks`. It is HARSH and reference-calibrated: a genuine artist
+  output scores ~90–100, current attempts ~5–25, so there is real headroom to
+  climb (not the old saturated ~92). `judge_checks` shows the two ratings + face.
+  `judge_gap` is the single most important change to look more like the reference.
 - `ink_coverage` (0–1) — non-white fraction. Density co-signal + guard
   against degenerate near-solid / near-blank output.
 - `ssim`, `edge_iou` (0–1) — pixel co-signals only; near-flat, don't chase.

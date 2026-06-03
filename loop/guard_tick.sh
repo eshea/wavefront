@@ -22,13 +22,15 @@
 # from good outputs (judge-85 and judge-15 renders differ by only a few %).
 #
 # Usage:   ./loop/guard_tick.sh <iter_number>
-# Env:     GUARD_FLOOR(60) GUARD_DROP(20) GUARD_INK_HI(0.92) GUARD_INK_LO(0.03)
-#          GUARD_FLOORS("8000=60,5002=25") GUARD_DISABLE GUARD_NO_COMMIT
-# Backend-aware: judge scales differ per backend (good render ~85 on vLLM-Qwen3,
-# ~40 on llama.cpp-Qwen3.5-abl :5002). The absolute floor is chosen per backend
-# from GUARD_FLOORS (matched by substring of the record's judge_backend), and the
-# relative-regression gate only compares within the SAME backend — so judge.py's
-# auto-fallback to a different-scale box can't trigger a false revert.
+# Env:     GUARD_FLOOR(8) GUARD_DROP(12) GUARD_INK_HI(0.92) GUARD_INK_LO(0.03)
+#          GUARD_FLOORS("8000=8,5002=8") GUARD_DISABLE GUARD_NO_COMMIT
+# Scale note: judge.py now uses the HARSH reference-replication rubric, where
+# current attempts score ~5-25 and a genuine artist output ~90-100. So the
+# absolute floor is LOW (it only rejects near-degenerate output; the ink_coverage
+# gate already catches blank/solid renders), and climbing is driven by the
+# relative-regression gate (revert if judge < recent_best - GUARD_DROP). Floors
+# are still matched per backend by substring of judge_backend so a cross-scale
+# fallback can't trigger a false revert.
 set -u
 cd "$(dirname "$0")/.."
 
@@ -43,15 +45,15 @@ verdict=$(python3 - "$iter_num" <<'PY'
 import json, os, sys
 
 iter_num = int(sys.argv[1])
-FLOOR  = float(os.environ.get("GUARD_FLOOR", 60))
-DROP   = float(os.environ.get("GUARD_DROP", 20))
+FLOOR  = float(os.environ.get("GUARD_FLOOR", 8))
+DROP   = float(os.environ.get("GUARD_DROP", 12))
 INK_HI = float(os.environ.get("GUARD_INK_HI", 0.92))
 INK_LO = float(os.environ.get("GUARD_INK_LO", 0.03))
-# Per-backend floor map "substr=floor,...". Judge scales differ by backend
-# (good render ~85 on vLLM-Qwen3, ~40 on llama.cpp-Qwen3.5-abl :5002), so the
-# absolute floor must track whichever backend produced the score. A backend
-# matching no key falls back to GUARD_FLOOR.
-FLOORS = os.environ.get("GUARD_FLOORS", "8000=30,5002=20")
+# Per-backend floor map "substr=floor,...". With the harsh resemblance rubric the
+# floor only needs to reject near-degenerate output (the ink gate handles blank/
+# solid); current attempts legitimately sit ~5-25 while climbing toward ~90, so
+# keep this LOW. A backend matching no key falls back to GUARD_FLOOR.
+FLOORS = os.environ.get("GUARD_FLOORS", "8000=8,5002=8")
 
 def floor_for(backend: str) -> float:
     for pair in FLOORS.split(","):
