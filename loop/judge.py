@@ -256,10 +256,12 @@ def main() -> int:
     p.add_argument("--reference", type=Path, default=DEFAULT_REF)
     p.add_argument("--iter", type=int, default=None)
     p.add_argument("--samples", type=int, default=1,
-                   help="number of independent judge calls; the reported "
-                        "judge_score is the median (de-noises outlier reads). "
-                        "N=1 uses temperature 0 (deterministic); N>1 draws at "
-                        "a small temperature so the samples actually vary.")
+                   help="number of judge calls (median reported). DEFAULT 1 is a "
+                        "single temperature-0 read: the checklist score "
+                        "(score_from_checks) is DETERMINISTIC, so one read is "
+                        "stable and reproducible. N>1 draws at temp>0 and only "
+                        "INJECTS noise (the boolean checks flip between draws) — "
+                        "leave it at 1 unless debugging.")
     args = p.parse_args()
 
     for path, name in [(args.output, "output"),
@@ -274,9 +276,12 @@ def main() -> int:
     content += labeled("CANDIDATE — score this:", args.output)
 
     n = max(1, args.samples)
-    # Single sample stays deterministic (temp 0); multi-sample draws warm to
-    # de-noise — but not TOO warm (Qwen3.5 swings wildly at 0.5, giving 15..96
-    # on the same image). 0.25 keeps genuine variation without the chaos.
+    # temp 0 = deterministic. The checklist score is computed from the booleans,
+    # which the model returns deterministically at temp 0 (verified: 5/5 identical
+    # on the same image). So the default single read is stable AND reproducible.
+    # Multi-sampling warms to temp>0, which makes the boolean checks flip between
+    # draws — i.e. it ADDS the noise the median was meant to remove. Only use N>1
+    # to debug; the median then papers over self-inflicted variance.
     temperature = 0.0 if n == 1 else float(os.environ.get("WAVEFRONT_JUDGE_TEMP", 0.25))
 
     # Pick a live backend once, up front, and use it for every sample (never

@@ -53,12 +53,14 @@ want to check for overfitting.
 After each tick, `loop/score_tick.sh` runs automatically and appends
 one JSON line to `loop/metrics.jsonl` with three numbers per output:
 
-- `judge_score` (0–100, **primary metric**) — MEDIAN of several reads from
-  a local vision model (`judge.py --samples`). Higher = better. NOTE the
-  absolute scale depends on `judge_backend` (a good render is ~85 on the
-  vLLM box, ~40–55 on the llama.cpp box); judge a tick only against ticks
-  with the SAME `judge_backend`. Watch `judge_spread` — if it's large the
-  read is noisy.
+- `judge_score` (0–100, **primary metric**) — a single DETERMINISTIC temp-0
+  read from a local vision model (`judge.py`). The score is computed from a
+  yes/no checklist (face/diamond/features_sharp/even_white/uniform/bg_clean/
+  clean) via `score_from_checks`, so it is stable and reproducible. Higher =
+  better; `judge_checks` shows which criteria passed. NOTE the scale depends on
+  `judge_backend`; compare ticks only within the SAME backend. The judge
+  reliably separates broken from good but CANNOT finely rank two already-good
+  renders — use the pixel co-signals + your eyes for fine calls.
 - `ink_coverage` (0–1) — non-white fraction. Density co-signal + guard
   against degenerate near-solid / near-blank output.
 - `ssim`, `edge_iou` (0–1) — pixel co-signals only; near-flat, don't chase.

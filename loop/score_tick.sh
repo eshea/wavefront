@@ -32,10 +32,12 @@ pixel_args=("--output" "$png" "--reference" "$ref" "--iter" "$iter_num")
 [ -f "$stats" ] && pixel_args+=("--stats-json" "$stats")
 pixel_line=$(python loop/score.py "${pixel_args[@]}" 2>>loop/log/score_errors.log)
 
-# Judge (local LLM). 3 samples → median, to de-noise outlier reads.
-# Override count with JUDGE_SAMPLES (1 = old deterministic single call).
+# Judge (local LLM). DEFAULT 1 sample = a single deterministic temp-0 read: the
+# checklist score (score_from_checks) is deterministic, so one read is stable and
+# reproducible. Multi-sampling at temp>0 only INJECTS noise (the boolean checks
+# flip between draws) — verified. Override with JUDGE_SAMPLES only to debug.
 judge_line=$(python loop/judge.py --output "$png" --reference "$ref" \
-  --iter "$iter_num" --samples "${JUDGE_SAMPLES:-5}" 2>>loop/log/score_errors.log)
+  --iter "$iter_num" --samples "${JUDGE_SAMPLES:-1}" 2>>loop/log/score_errors.log)
 
 # Merge into one record. Both scripts emit single-line JSON.
 python3 -c "
