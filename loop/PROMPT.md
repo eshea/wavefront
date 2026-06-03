@@ -145,29 +145,24 @@ is fine when you genuinely don't have a hypothesis.
 
 ## TEST PROCEDURE (canonical)
 
-The Flask app should already be running on port 5055. If not, start it:
-
-```
-cd /Users/eshea/Projects/wavefront
-source .venv/bin/activate
-PORT=5055 python app.py &
-sleep 2
-```
-
-Then render the canonical test with the single render helper. It POSTs
-the exact canonical settings to `/process` and writes all three
+Render the canonical test with the single render helper. It renders
+IN-PROCESS via `loop/render.py` (a fresh `python` import per tick) — NO
+Flask app required. This is deliberate: the long-running app never
+reloaded engine edits, so the loop's changes had no effect; rendering
+in-process makes each edit actually take effect. It writes all three
 artifacts — `iter_NNN.svg`, `iter_NNN.png` (rasterized), and
 `iter_NNN.stats.json` (the path-count stats `score.py` needs for
 `path_fit`):
 
 ```
+cd /Users/eshea/Projects/wavefront
+source .venv/bin/activate
 ./loop/render_tick.sh "$(cat loop/.iter 2>/dev/null || echo 1)"
 ```
 
-Always use this helper rather than hand-rolling curl — it guarantees
-every tick renders identical settings and writes the stats.json without
-which `path_fit` stays null. (`PORT` defaults to 5055; override if you
-started the app elsewhere.)
+Always use this helper rather than hand-rolling a render — it guarantees
+every tick renders identical settings (centered seed, levels 90,
+method=wave) and writes the stats.json without which `path_fit` stays null.
 
 Then view your output and the reference visually:
 

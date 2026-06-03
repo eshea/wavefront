@@ -26,16 +26,11 @@ source .venv/bin/activate
 # and a free agent loop over-works; the proposer is reliable + fast ~10s/tick).
 export DRIVER=proposer
 
-# Bring up the Flask app (needed by render_tick / holdout).
-if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5055/ 2>/dev/null)" != "200" ]; then
-  PORT=5055 nohup python app.py > loop/log/app_${stamp}.log 2>&1 &
-  for i in $(seq 1 20); do
-    [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5055/ 2>/dev/null)" = "200" ] && break
-    sleep 1
-  done
-fi
+# NOTE: no Flask app needed. render_tick.sh renders IN-PROCESS via loop/render.py
+# (a fresh import per tick) so the loop's engine edits actually take effect — the
+# long-running app never reloaded them. The judge talks to neuromancer directly.
 
-# 4. Pre-flight: judge backend reachable?
+# Pre-flight: judge backend reachable?
 curl -s --max-time 5 -o /dev/null -w '[scheduled] neuromancer judge HTTP %{http_code}\n' \
   http://neuromancer:8000/v1/models || echo "[scheduled] WARN: judge probe failed"
 

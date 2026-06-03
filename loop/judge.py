@@ -172,7 +172,15 @@ def call_llm(content: list[dict], timeout: int = 45,
         return json.loads(resp.read())
 
 
-_CHECK_KEYS = ("face", "diamond", "even_white", "clean")
+# Face is the gate; the remaining checks each carry weight toward the score. The
+# weighted sum gives FINE resolution (many distinct totals) so two "good" renders
+# differentiate — unlike the old 5-band rubric that saturated everything at ~92.
+_CHECK_KEYS = ("face", "diamond", "features_sharp", "even_white",
+               "uniform", "bg_clean", "clean")
+_SECONDARY_WEIGHTS = {
+    "diamond": 0.20, "features_sharp": 0.18, "even_white": 0.16,
+    "uniform": 0.16, "clean": 0.16, "bg_clean": 0.14,            # sum = 1.00
+}
 
 
 def _as_bool(v):
@@ -190,28 +198,22 @@ def _as_bool(v):
     return None
 
 
-def band_clamp(score: int, checks: dict) -> int:
-    """Clamp the model's score into the band implied by its yes/no checklist, so
-    the number is reproducible from the checks (Qwen's free-form score is noisy).
+def score_from_checks(checks: dict):
+    """Deterministic score from the yes/no checklist (loop/prompts/judge.md).
 
-    Bands mirror loop/prompts/judge.md. Applied only when ALL four checks are
-    present; otherwise the raw score is returned unchanged.
+    face is a hard gate. With a face, score = 55 + 45·(weighted fraction of the
+    secondary checks that passed) -> 55 (face only) .. 100 (all). Without a face,
+    score = min(35, 15 + 20·frac). Returns None if `face` is absent (caller then
+    falls back to the model's own score). Missing secondary checks count as False.
     """
-    vals = [checks.get(k) for k in _CHECK_KEYS]
-    if any(v is None for v in vals):
-        return score
-    face, diamond, even_white, clean = vals
+    face = checks.get("face")
+    if face is None:
+        return None
+    passed = sum(w for k, w in _SECONDARY_WEIGHTS.items() if checks.get(k) is True)
+    frac = passed / sum(_SECONDARY_WEIGHTS.values())
     if not face:
-        lo, hi = 1, 35
-    elif not diamond:
-        lo, hi = 36, 55
-    elif not even_white:
-        lo, hi = 50, 70
-    elif not clean:
-        lo, hi = 71, 85
-    else:
-        lo, hi = 86, 100
-    return max(lo, min(hi, score))
+        return int(round(min(35.0, 15.0 + 20.0 * frac)))
+    return int(round(55.0 + 45.0 * frac))
 
 
 def parse(reply: dict) -> dict:
@@ -221,16 +223,24 @@ def parse(reply: dict) -> dict:
     for blob in re.findall(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL):
         try:
             d = json.loads(blob)
-            s = int(d.get("score", -1))
-            if 0 <= s <= 100:
-                checks = {k: _as_bool(d.get(k)) for k in _CHECK_KEYS}
-                result["score"] = band_clamp(s, checks)
-                result["checks"] = checks
-                result["notes"] = str(d.get("notes", "")).strip()
-                result["gap"] = str(d.get("biggest_gap", "")).strip()
-                return result
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError:
             continue
+        checks = {k: _as_bool(d.get(k)) for k in _CHECK_KEYS}
+        derived = score_from_checks(checks)
+        if derived is not None:                 # checklist present -> authoritative
+            result["score"] = derived
+        else:                                   # no booleans -> fall back to model score
+            try:
+                s = int(d.get("score", -1))
+            except (TypeError, ValueError):
+                continue
+            if not (0 <= s <= 100):
+                continue
+            result["score"] = s
+        result["checks"] = checks
+        result["notes"] = str(d.get("notes", "")).strip()
+        result["gap"] = str(d.get("biggest_gap", "")).strip()
+        return result
     m = re.search(r"score[^0-9-]{0,12}([0-9]{1,3})", text, re.IGNORECASE)
     if m:
         n = int(m.group(1))
