@@ -33,7 +33,7 @@ import prompts  # noqa: E402
 LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://neuromancer:8000").rstrip("/")
 MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
 REPO = Path(__file__).resolve().parent.parent
-REFERENCE = REPO / "examples" / "contour_woman_lineart.png"
+REFERENCE = REPO / "examples" / "contour_space_post.webp"   # matched target for the helmet input
 EDITABLE = ["engine/field.py", "engine/contour.py"]   # the tuning surface shown
 MAX_ATTEMPTS = 3
 

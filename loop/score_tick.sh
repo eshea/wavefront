@@ -18,7 +18,7 @@ iter_num=$((10#${1:?iter number required}))   # 10# = force base-10 (a padded
 iter_pad=$(printf '%03d' "$iter_num")
 png="loop/output/iter_${iter_pad}.png"
 stats="loop/output/iter_${iter_pad}.stats.json"
-ref="examples/contour_woman_lineart.png"   # clean diamond line-art target
+ref="examples/contour_space_post.webp"   # the artist's CONTOUR-V output for the helmet input (matched pair)
 
 if [ ! -f "$png" ]; then
   echo "[score_tick] no $png — skipping scoring for iter $iter_pad" >&2

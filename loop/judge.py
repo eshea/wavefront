@@ -116,15 +116,11 @@ def resolve_backend() -> str:
     return cands[0]
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_REF = REPO / "examples" / "contour_woman_lineart.png"  # clean line-art
-# (cropped from the CONTOUR-V CORE screenshot — same woman, clean diamond geometry,
-#  a sharper target than the ink-on-photo contour_woman_post1.jpeg)
-ANCHOR_HIGH = REPO / "examples" / "contour_woman_post1.jpeg"  # the ARTIST's real
-# plotted output — the ground-truth "good" (was a synthetic WAVEFRONT render).
-ANCHOR_LOW_DESC = (
-    "ANCHOR_15 (not shown): a previous candidate that was nearly blank "
-    "with sparse Lissajous-like noise, no face visible — humans rated 15."
-)
+DEFAULT_REF = REPO / "examples" / "contour_space_post.webp"  # the artist's actual
+# CONTOUR-V output for contour_space_pre.jpg (astronaut helmet) — a CLEAN, high-res,
+# truly MATCHED input->output pair (the canonical target). The old contour_woman_*
+# targets were a DIFFERENT subject than the woman input, so resemblance was
+# unachievable; they're retained only as style references / the holdout.
 
 
 # The judge rubric lives in loop/prompts/judge.md (load() reloads it live in dev,
@@ -173,14 +169,16 @@ def call_llm(content: list[dict], timeout: int = 45,
 
 
 # Reference-replication rubric (loop/prompts/judge.md): the model rates two graded
-# dimensions 0-10 — diamond_match (same nested-diamond lattice as the reference) and
-# resemblance (could pass as the artist's own output) — plus a face gate. The score
-# is derived deterministically so it's reproducible at temp 0. This is deliberately
-# HARSH and reference-calibrated: a real artist output scores ~85-100, current
-# attempts ~0-25, so there is real headroom and the loop has a gradient to climb
+# dimensions 0-10 — structure_match (same contour structure/flow/density as the
+# reference) and resemblance (could pass as the artist's own output) — plus a
+# `subject` gate (is the reference's subject — face, helmet, object — recognizable).
+# Subject-AGNOSTIC and reference-driven, so it works for any matched target (the
+# helmet waves, a diamond face, etc.). The score is derived deterministically so
+# it's reproducible at temp 0. Deliberately HARSH and reference-calibrated: a real
+# artist output scores ~85-100, current attempts ~0-25 -> real headroom + a gradient
 # (the old saturating checklist rated every decent render ~92-100, which was useless).
-_DIM_KEYS = ("diamond_match", "resemblance")
-_FACE_CAP = 25   # no real face -> score can't exceed this (kills faceless lattices)
+_DIM_KEYS = ("structure_match", "resemblance")
+_SUBJECT_CAP = 25   # subject not recognizable -> score capped (kills abstract patterns)
 
 
 def _as_bool(v):
@@ -209,17 +207,17 @@ def _as_unit10(v):
 def score_from_checks(checks: dict):
     """Deterministic score from the reference-replication dims (loop/prompts/judge.md).
 
-    score = (diamond_match + resemblance) / 20 * 100, then capped at _FACE_CAP when
-    no real face is present. Returns None if a dimension is missing (caller falls
-    back to any raw model score).
+    score = (structure_match + resemblance) / 20 * 100, then capped at _SUBJECT_CAP
+    when the reference's subject isn't recognizable. Returns None if a dimension is
+    missing (caller falls back to any raw model score).
     """
-    dm = checks.get("diamond_match")
+    sm = checks.get("structure_match")
     rs = checks.get("resemblance")
-    if dm is None or rs is None:
+    if sm is None or rs is None:
         return None
-    score = int(round((dm + rs) / 20.0 * 100.0))
-    if checks.get("face") is False:
-        score = min(score, _FACE_CAP)
+    score = int(round((sm + rs) / 20.0 * 100.0))
+    if checks.get("subject") is False:
+        score = min(score, _SUBJECT_CAP)
     return max(0, min(100, score))
 
 
@@ -228,13 +226,13 @@ def parse(reply: dict) -> dict:
     text = msg.get("content") or msg.get("reasoning") or ""
     result = {"score": -1, "notes": "", "gap": "", "checks": {}}
     # Match any flat JSON object that carries one of our dimension keys.
-    for blob in re.findall(r"\{[^{}]*(?:diamond_match|resemblance|score)[^{}]*\}", text, re.DOTALL):
+    for blob in re.findall(r"\{[^{}]*(?:structure_match|resemblance|score)[^{}]*\}", text, re.DOTALL):
         try:
             d = json.loads(blob)
         except json.JSONDecodeError:
             continue
         checks = {k: _as_unit10(d.get(k)) for k in _DIM_KEYS}
-        checks["face"] = _as_bool(d.get("face"))
+        checks["subject"] = _as_bool(d.get("subject"))
         derived = score_from_checks(checks)
         if derived is not None:                 # rubric dims present -> authoritative
             result["score"] = derived

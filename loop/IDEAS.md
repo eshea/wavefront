@@ -1,8 +1,10 @@
 # WAVEFRONT wave-field knob menu (pick ONE per tick)
 
 Canonical render is `method=wave` (`build_wave_field` in `engine/field.py`),
-centered seed, levels 65, lum_mix 0.8. Target = the artist's clean diamonds:
-`examples/contour_woman_lineart.png` + `contour_woman_post*`. Judge = local Qwen.
+centered seed, levels 90, lum_mix 0.8. Target = the artist's actual CONTOUR-V
+output for the astronaut-helmet input: `examples/contour_space_pre.jpg` →
+`examples/contour_space_post.webp` (a clean, matched pair; flowing-wave look).
+Judge = local Qwen (harsh reference-replication rubric).
 
 **How to use this each tick:** read the latest `judge_gap` (the judge's single
 biggest difference from the reference), find the ONE matching symptom below, and

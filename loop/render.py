@@ -46,7 +46,7 @@ METHODS = ("contour", "wave", "flow", "march")
 
 def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
            wt_range=0.0, seed_x=None, seed_y=None,
-           input_path=REPO / "examples" / "contour_woman.webp",
+           input_path=REPO / "examples" / "contour_space_pre.jpg",
            png_width=434, out_dir=REPO / "loop" / "output"):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +102,7 @@ def main():
     p.add_argument("--wt-range", type=float, default=0.0)
     p.add_argument("--seed-x", type=int, default=None)
     p.add_argument("--seed-y", type=int, default=None)
-    p.add_argument("--input", type=Path, default=REPO / "examples" / "contour_woman.webp")
+    p.add_argument("--input", type=Path, default=REPO / "examples" / "contour_space_pre.jpg")
     p.add_argument("--png-width", type=int, default=434)
     p.add_argument("--out-dir", type=Path, default=REPO / "loop" / "output")
     a = p.parse_args()

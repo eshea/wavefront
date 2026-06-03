@@ -17,12 +17,16 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/contour_woman.webp` | `examples/contour_woman_lineart.png` (clean diamond line-art; also `contour_woman_post*`) | centered seed, levels 65, method=wave |
+| `examples/contour_space_pre.jpg` (astronaut helmet) | `examples/contour_space_post.webp` — the artist's actual CONTOUR-V output (a CLEAN, high-res, truly MATCHED pair; flowing-wave look) | centered seed, levels 90, method=wave/march |
 
-The woman is the **canonical test**, baked into `loop/render_tick.sh` +
-`loop/score_tick.sh`. Also study the new style references in `examples/`
-(the blue VEX-LINE face, `Screenshot ... CONTOUR-V CORE`, Motoko) with
-the Read tool — they are output-only (no inputs), pure visual targets.
+NOTE: the old `contour_woman_*` set is NOT a matched pair — the woman input and the
+`contour_woman_lineart`/`post*` targets are DIFFERENT subjects, so resemblance was
+unachievable. They're retained as style references / the holdout only.
+
+The astronaut helmet is the **canonical test**, baked into `loop/render_tick.sh` +
+`loop/score_tick.sh`. Also study the style references in `examples/` (the blue
+VEX-LINE face, `ref_contourv_core`, Motoko, and the classical-woman lineart) with
+the Read tool — they are output-only (no matched inputs), pure visual targets.
 
 ### WHAT YOU ARE TUNING NOW: the WAVE / L1-diamond field (`build_wave_field`)
 The canonical render uses **`method=wave`** (`render_tick.sh`): an L1 (Manhattan)
@@ -91,10 +95,11 @@ loop/metrics.jsonl` after `score_tick.sh` runs.
 ## THE GOAL: REPLICATE THE ARTIST'S EXAMPLES
 
 The north star is always to make the canonical output **pass for one of the
-artist's own outputs** (`examples/contour_woman_lineart.png` + `post*`): a crisp
-concentric DIAMOND from a center, lines that bend around features, EVEN spacing,
-generous WHITE SPACE, clean linework edge-to-edge. The judge scores closeness to
-that and tells you the `judge_gap`. A good render is ~85; reaching that is the job.
+artist's own output** for the canonical input — `examples/contour_space_post.webp`:
+flowing wave contours that bend around the helmet, dense where the image is dark
+(the visor), sparse/clean in the bright sky and desert. The judge scores closeness
+to THAT matched target and tells you the `judge_gap`. Genuine replication scores
+~90; current attempts ~5–25 — closing that gap is the job.
 
 ## BREADTH FIRST — DO NOT HILL-CLIMB
 
@@ -172,7 +177,7 @@ Then view your output and the reference visually:
 ```
 # In your prompt, use Read on both:
 Read loop/output/iter_NNN.png
-Read examples/contour_woman_lineart.png
+Read examples/contour_space_post.webp
 ```
 
 Read returns images visually. Look at them and compare specifically:
@@ -198,9 +203,9 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (woman, centered seed, levels 65, method=wave)
+**Test:** canonical (helmet, centered seed, levels 90, method=wave)
 - output: `loop/output/iter_NNN.svg` ({stats})
-- reference: `examples/contour_woman_lineart.png`
+- reference: `examples/contour_space_post.webp`
 - visual comparison: {what you saw — be specific}
 
 **Score:** judge=NN ssim=0.0NNN edge_iou=0.NNNN path_fit=0.NN
