@@ -45,8 +45,19 @@ class _SpatialHash:
         return False
 
 
+# Directional carrier for the flow field. Pure image-tangent flow curls randomly in
+# FLAT regions (e.g. open sky) where the gradient direction is undefined. Blending a
+# global carrier direction there makes those regions flow STRAIGHT (long, clean waves
+# like the artist's output) while feature regions still follow the image. The ralph
+# loop can tune these like the WAVE_*/MARCH_* constants.
+FLOW_ANGLE = 20.0      # carrier direction in degrees (0 = horizontal waves)
+FLOW_CARRIER = 0.6     # 0 = pure image tangent; 1 = carrier fully dominates flat areas
+FLOW_CARRIER_MAG = 6.0 # gradient magnitude at which the image fully overrides the carrier
+
+
 def _tangent_field(luminance, sigma):
-    """Unit tangent field = image gradient rotated 90° (flows along iso-brightness)."""
+    """Unit tangent field = image gradient rotated 90° (flows along iso-brightness),
+    blended with a global carrier direction in flat regions (see FLOW_* constants)."""
     lum = gaussian_filter(luminance.astype(np.float32), sigma=sigma)
     gy, gx = np.gradient(lum)            # gy = d/d(row), gx = d/d(col)
     mag = np.hypot(gx, gy)
@@ -54,7 +65,25 @@ def _tangent_field(luminance, sigma):
     tx = -gy
     ty = gx
     norm = np.hypot(tx, ty) + 1e-6
-    return (tx / norm).astype(np.float32), (ty / norm).astype(np.float32), mag
+    tx /= norm
+    ty /= norm
+
+    # Carrier unit vector.
+    ca = np.radians(FLOW_ANGLE)
+    cx, cy = float(np.cos(ca)), float(np.sin(ca))
+    # Resolve the tangent's 180° ambiguity by flipping it into the carrier's
+    # hemisphere, so blending can't cancel two opposite-pointing-but-equal tangents.
+    flip = (tx * cx + ty * cy) < 0
+    tx = np.where(flip, -tx, tx)
+    ty = np.where(flip, -ty, ty)
+    # Blend weight w: ~1 where the gradient is strong (follow the image), ->carrier
+    # where it's flat. FLOW_CARRIER scales how much the carrier intrudes overall.
+    w0 = mag / (mag + FLOW_CARRIER_MAG)
+    w = 1.0 - FLOW_CARRIER * (1.0 - w0)
+    bx = w * tx + (1.0 - w) * cx
+    by = w * ty + (1.0 - w) * cy
+    bn = np.hypot(bx, by) + 1e-6
+    return (bx / bn).astype(np.float32), (by / bn).astype(np.float32), mag
 
 
 def _sample(field_x, field_y, x, y):
