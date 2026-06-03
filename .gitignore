@@ -57,3 +57,13 @@ loop/sweep_results.jsonl
 loop/WAVE_SWEEP.md
 loop/sweep_best.png
 loop/sweep_best.svg
+
+# Force-track the marching-waves sample renders as durable visual references
+# (the *.png/*.svg rules above would otherwise ignore them). Regenerable via
+# `python loop/render.py N --method march` with the noted MARCH_* knobs.
+!loop/march_sample_expressive.png
+!loop/march_sample_expressive.svg
+!loop/march_sample_balanced.png
+!loop/march_sample_balanced.svg
+!loop/march_sample_diamond.png
+!loop/march_sample_diamond.svg
