@@ -53,6 +53,10 @@ class _SpatialHash:
 FLOW_ANGLE = 20.0      # carrier direction in degrees (0 = horizontal waves)
 FLOW_CARRIER = 0.6     # 0 = pure image tangent; 1 = carrier fully dominates flat areas
 FLOW_CARRIER_MAG = 6.0 # gradient magnitude at which the image fully overrides the carrier
+FLOW_TONE_DENSITY = 0.6  # darkness -> tighter line spacing (denser lines in dark regions,
+                         # e.g. the visor). 0 = even spacing everywhere; 0.6 packs darks
+                         # to ~40% of the base separation. The artist's output is dense
+                         # in shadow and sparse in highlight — this reproduces that.
 
 
 def _tangent_field(luminance, sigma):
@@ -130,6 +134,16 @@ def trace_flow_lines(luminance, seed_x, seed_y, n_levels, lum_mix=1.0,
     grid = _SpatialHash(max(d_sep, 1.0), W, H)
     diag = float(np.hypot(W, H))
 
+    # Tone-modulated spacing: tighter line separation in dark regions so shadows
+    # (the visor) pack denser, like the artist's output. The spatial hash keeps the
+    # base (largest) cell size; only the proximity radius / seed offset shrink.
+    dark = 1.0 - np.clip(gaussian_filter(luminance, sigma=max(2.0, sigma)) / 255.0, 0.0, 1.0)
+
+    def sep_at(x, y):
+        xi = int(x) if 0 <= x < W else int(np.clip(x, 0, W - 1))
+        yi = int(y) if 0 <= y < H else int(np.clip(y, 0, H - 1))
+        return max(1.5, d_sep * (1.0 - FLOW_TONE_DENSITY * float(dark[yi, xi])))
+
     def integrate(x0, y0, sign):
         """RK2-integrate from (x0,y0); stop at bounds / flat field / a neighbor line."""
         pts = []
@@ -146,7 +160,7 @@ def trace_flow_lines(luminance, seed_x, seed_y, n_levels, lum_mix=1.0,
             if nx < 0 or ny < 0 or nx >= W or ny >= H:
                 break
             # Don't let the very first steps trip on the seeding line's own points.
-            if i > 1 and grid.too_close(nx, ny, d_test):
+            if i > 1 and grid.too_close(nx, ny, 0.5 * sep_at(nx, ny)):
                 break
             x, y = nx, ny
             pts.append((x, y))
@@ -157,7 +171,7 @@ def trace_flow_lines(luminance, seed_x, seed_y, n_levels, lum_mix=1.0,
     qi = 0
     while qi < len(queue) and len(lines) < max_lines:
         sx, sy = queue[qi]; qi += 1
-        if grid.too_close(sx, sy, d_test):
+        if grid.too_close(sx, sy, 0.5 * sep_at(sx, sy)):
             continue
         fwd = integrate(sx, sy, +1.0)
         bwd = integrate(sx, sy, -1.0)
@@ -174,8 +188,9 @@ def trace_flow_lines(luminance, seed_x, seed_y, n_levels, lum_mix=1.0,
             if d is None:
                 continue
             nx_, ny_ = -d[1], d[0]   # perpendicular
-            queue.append((px + nx_ * d_sep, py + ny_ * d_sep))
-            queue.append((px - nx_ * d_sep, py - ny_ * d_sep))
+            s = sep_at(px, py)       # tone-local separation -> denser seeds in shadow
+            queue.append((px + nx_ * s, py + ny_ * s))
+            queue.append((px - nx_ * s, py - ny_ * s))
 
     contours = []
     total_points = 0
