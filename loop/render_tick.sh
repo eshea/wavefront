@@ -24,10 +24,17 @@ cd "$(dirname "$0")/.."
 
 iter_num=$((10#${1:?iter number required}))   # force base-10 ('033' is octal otherwise)
 png_width="${PNG_WIDTH:-434}"
-method="${METHOD:-wave}"   # the loop tunes build_wave_field (L1-diamond, the active method)
+method="${METHOD:-flow}"   # the loop tunes engine/flow.py (streamlines — matches the helmet target)
 
-python_bin="python"
-command -v python >/dev/null 2>&1 || python_bin="python3"
+# Prefer the project venv python (it has the deps); the loop may invoke this from a
+# subprocess where the venv isn't activated, so don't rely on PATH `python`.
+if [ -x .venv/bin/python ]; then
+  python_bin=".venv/bin/python"
+elif command -v python >/dev/null 2>&1; then
+  python_bin="python"
+else
+  python_bin="python3"
+fi
 
 "$python_bin" loop/render.py "$iter_num" \
   --method "$method" \

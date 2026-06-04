@@ -34,7 +34,7 @@ LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://neuromancer:8000").rstrip("/"
 MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
 REPO = Path(__file__).resolve().parent.parent
 REFERENCE = REPO / "examples" / "contour_space_post.webp"   # matched target for the helmet input
-EDITABLE = ["engine/field.py", "engine/contour.py"]   # the tuning surface shown
+EDITABLE = ["engine/flow.py"]   # the tuning surface shown (the active method=flow)
 MAX_ATTEMPTS = 3
 
 
@@ -67,20 +67,20 @@ def recent_metrics(n=6):
 
 
 ACTIVE_NOTE = """# ACTIVE SURFACE — what actually affects the scored render
-The canonical render uses **method=wave** (build_wave_field, the L1-diamond
-field), so ONLY these constants change the output:
-  - engine/field.py  -> build_wave_field()'s knobs:
-      WAVE_DIAMOND   (0=full luminance ripple, 1=ignore the face -> crisp diamonds)
-      WAVE_RELIEF    (luminance ripple amplitude; low => diamonds dominate)
-      WAVE_SIGMA_FACE(blur near the seed; lower => more feature wrap)
-      WAVE_SIGMA_BG  (blur far from the seed; higher => calmer background)
-      WAVE_FAR       (far-field ripple multiplier; lower => cleaner bg diamonds)
-      WAVE_INNER / WAVE_OUTER (face vs background zone radii, fraction of min(W,H))
-  - engine/contour.py -> THRESHOLD_POWER  (level spacing; 1.0 = even spacing)
-  - the render also passes lum_mix=0.8 (scales the wave relief).
-IGNORE FIELD_DENOISE_SIGMA, FIELD_SHADOW_LIFT, build_field(), and engine/flow.py
-— those are PARKED experiments (method=contour/flow), NOT rendered. Editing them
-does NOTHING. Edit a WAVE_* constant or THRESHOLD_POWER (one per tick)."""
+The canonical render uses **method=flow** (engine/flow.py — evenly-spaced
+streamlines that flow ALONG the image, the match for the helmet target's waves).
+ONLY these module constants in engine/flow.py change the output:
+  - FLOW_ANGLE       carrier wave direction in degrees (0 = horizontal waves)
+  - FLOW_CARRIER     0..1: how much the carrier straightens FLAT areas (sky).
+                     higher => cleaner straight waves; lower => follows image more
+  - FLOW_CARRIER_MAG gradient magnitude at which the image overrides the carrier
+  - FLOW_TONE_DENSITY 0..1: darkness -> tighter line spacing (denser shadows /
+                     the visor). higher => denser dark regions
+  - the trace_flow_lines defaults: sigma (tangent blur; higher => smoother/longer
+    lines) and the n_levels->d_sep density mapping.
+  - the render passes levels=90, lum_mix=0.8.
+IGNORE the WAVE_*/FIELD_* constants and build_field/build_wave_field — those are
+PARKED methods (wave/contour), NOT rendered now. Edit ONE FLOW_* constant per tick."""
 
 
 def build_user_text():

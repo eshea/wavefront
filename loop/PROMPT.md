@@ -28,23 +28,20 @@ The astronaut helmet is the **canonical test**, baked into `loop/render_tick.sh`
 VEX-LINE face, `ref_contourv_core`, Motoko, and the classical-woman lineart) with
 the Read tool — they are output-only (no matched inputs), pure visual targets.
 
-### WHAT YOU ARE TUNING NOW: the WAVE / L1-diamond field (`build_wave_field`)
-The canonical render uses **`method=wave`** (`render_tick.sh`): an L1 (Manhattan)
-distance base that dominates the gradient — giving crisp concentric **diamonds**
-that stay topologically intact everywhere — plus a GENTLE luminance relief so the
-diamonds ripple around eyes/nose/mouth without breaking into closed loops. The
-relief is suppressed far from the seed so hair/background render as clean
-diamonds, not dense texture. Aim for EVEN line spacing and generous white space.
-Your knobs (all in `engine/field.py` unless noted):
-- `WAVE_DIAMOND` — 0 = full ripple, 1 = ignore the face (pure crisp diamonds).
-- `WAVE_RELIEF` — luminance ripple amplitude; low => diamonds dominate.
-- `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG` — luminance blur near / far from the seed.
-- `WAVE_FAR` — far-field ripple multiplier; low => clean background diamonds.
-- `WAVE_INNER` / `WAVE_OUTER` — face vs background zone radii (fraction of min(W,H)).
-- `engine/contour.py`: `THRESHOLD_POWER` (1.0 = linear/even spacing; >1 densifies).
-- render params: `lum_mix` (scales the relief), `levels`.
-Tune ONE per tick. `method=contour` (`build_field`) and `method=flow` are parked
-experiments; leave them and their constants (FIELD_*) alone.
+### WHAT YOU ARE TUNING NOW: the FLOW streamline field (`engine/flow.py`)
+The canonical render uses **`method=flow`** (`render_tick.sh`): evenly-spaced
+streamlines that flow ALONG the image (Jobard–Lefebvre), with a directional
+CARRIER so flat regions (sky) flow in clean straight waves and a TONE-density term
+so dark regions (the visor) pack denser. This matches the helmet target's flowing
+waves. Your knobs (all in `engine/flow.py`):
+- `FLOW_ANGLE` — carrier wave direction in degrees (0 = horizontal waves).
+- `FLOW_CARRIER` — 0..1, how much the carrier straightens flat areas (higher = cleaner waves).
+- `FLOW_CARRIER_MAG` — gradient magnitude at which the image overrides the carrier.
+- `FLOW_TONE_DENSITY` — 0..1, darkness → tighter spacing (denser visor/shadows).
+- `trace_flow_lines` defaults: `sigma` (tangent blur; higher = smoother/longer lines).
+- render params: `lum_mix`, `levels` (density).
+Tune ONE per tick (see `loop/IDEAS.md` menu). `method=wave/contour/march` and their
+WAVE_*/FIELD_*/MARCH_* constants are PARKED — they don't affect the flow render.
 
 **HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
 `loop/holdout/contour_space_post.webp` are the held-out test set. Do
