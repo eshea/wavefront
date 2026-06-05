@@ -5,15 +5,19 @@ Flask web application entry point.
 
 import io
 import os
-import base64
 import math
+import base64
 import traceback
+import contextlib
 
 from flask import Flask, render_template, request, jsonify
 from PIL import Image, UnidentifiedImageError
 
-from engine.field import (load_and_preprocess, to_luminance, build_field,
-                          build_wave_field, WAVE_DIAMOND)
+import engine.field as ef
+import engine.contour as ec
+import engine.flow as efl
+import engine.march as em
+from engine.field import load_and_preprocess, to_luminance, build_field, build_wave_field
 from engine.contour import extract_contours, scale_contours
 from engine.smooth import smooth_contours
 from engine.export import contours_to_svg_string_fast
@@ -21,6 +25,73 @@ from engine.flow import trace_flow_lines
 from engine.march import build_march_field
 
 METHODS = ('contour', 'wave', 'flow', 'march')  # contour = classic isolines (default)
+
+# Per-method tuning knobs exposed to the UI. Each entry:
+#   (form_field, module, ATTR, min, max)
+# The engine reads these as module-level constants, so we temporarily override the
+# constants for the duration of a request (see _apply_knobs) — no engine signature
+# churn, and it mirrors exactly what the ralph loop tunes. THRESHOLD_POWER (level
+# spacing) applies to every isoline method (contour/wave/march) but not flow.
+_THRESH = ('threshold_power', ec, 'THRESHOLD_POWER', 0.6, 3.0)
+METHOD_KNOBS = {
+    'contour': [
+        ('field_denoise_sigma', ef, 'FIELD_DENOISE_SIGMA', 0.0, 25.0),
+        ('field_shadow_lift',   ef, 'FIELD_SHADOW_LIFT',   0.0, 150.0),
+        _THRESH,
+    ],
+    'wave': [
+        ('wave_diamond',     ef, 'WAVE_DIAMOND',     0.0, 1.0),
+        ('wave_relief',      ef, 'WAVE_RELIEF',      0.0, 1.5),
+        ('wave_far',         ef, 'WAVE_FAR',         0.0, 1.0),
+        ('wave_sigma_face',  ef, 'WAVE_SIGMA_FACE',  2.0, 20.0),
+        ('wave_sigma_bg',    ef, 'WAVE_SIGMA_BG',    5.0, 50.0),
+        ('wave_inner',       ef, 'WAVE_INNER',       0.0, 0.5),
+        ('wave_outer',       ef, 'WAVE_OUTER',       0.3, 1.3),
+        _THRESH,
+    ],
+    'march': [
+        ('march_base',     em, 'MARCH_BASE',     0.2, 10.0),
+        ('march_tone',     em, 'MARCH_TONE',     0.0, 6.0),
+        ('march_edge',     em, 'MARCH_EDGE',     0.0, 6.0),
+        ('march_gamma',    em, 'MARCH_GAMMA',    0.4, 2.5),
+        ('march_contrast', em, 'MARCH_CONTRAST', 0.5, 2.5),
+        ('march_blur',     em, 'MARCH_BLUR',     0.0, 6.0),
+        _THRESH,
+    ],
+    'flow': [
+        ('flow_angle',        efl, 'FLOW_ANGLE',        0.0, 90.0),
+        ('flow_carrier',      efl, 'FLOW_CARRIER',      0.0, 1.0),
+        ('flow_carrier_mag',  efl, 'FLOW_CARRIER_MAG',  1.0, 20.0),
+        ('flow_tone_density', efl, 'FLOW_TONE_DENSITY', 0.0, 1.0),
+        ('flow_sigma',        efl, 'FLOW_SIGMA',        1.0, 12.0),
+    ],
+}
+
+
+@contextlib.contextmanager
+def _apply_knobs(method):
+    """Temporarily override the active method's engine constants from request form
+    values (clamped to each knob's range), restoring them afterward. Keeps the
+    engine's module-global tuning surface intact while letting the UI drive it."""
+    saved = []
+    try:
+        for field, module, attr, lo, hi in METHOD_KNOBS.get(method, ()):
+            raw = request.form.get(field)
+            if raw is None or raw.strip() == '':
+                continue
+            try:
+                val = float(raw)
+            except ValueError as exc:
+                raise RequestValidationError(f'{field} must be a number') from exc
+            if not math.isfinite(val):
+                raise RequestValidationError(f'{field} must be finite')
+            val = max(lo, min(hi, val))
+            saved.append((module, attr, getattr(module, attr)))
+            setattr(module, attr, val)
+        yield
+    finally:
+        for module, attr, prev in reversed(saved):
+            setattr(module, attr, prev)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max upload
@@ -94,6 +165,20 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/config')
+def config():
+    """Knob registry for the UI — one source of truth so the sliders always match
+    the backend. Each knob: field name, range, and the engine's current default."""
+    knobs = {
+        method: [
+            {'field': field, 'min': lo, 'max': hi, 'default': float(getattr(module, attr))}
+            for field, module, attr, lo, hi in specs
+        ]
+        for method, specs in METHOD_KNOBS.items()
+    }
+    return jsonify({'methods': list(METHODS), 'knobs': knobs})
+
+
 @app.route('/process', methods=['POST'])
 def process():
     """
@@ -126,7 +211,6 @@ def process():
         method = request.form.get('method', 'contour').strip().lower()
         if method not in METHODS:
             method = 'contour'
-        diamond = _parse_float_param('diamond', WAVE_DIAMOND, 0.0, 1.0)  # wave only
 
         try:
             rgb_array, original_size, processed_size = load_and_preprocess(image_file)
@@ -142,20 +226,23 @@ def process():
         sx = max(0, min(img_w - 1, sx))
         sy = max(0, min(img_h - 1, sy))
 
-        # Field-construction method:
-        #   contour (default) — additive Manhattan+luminance field, marching squares
-        #   wave              — eikonal travel-time field (Approach 2), marching squares
-        #   flow              — gradient streamlines (Approach 3), traced directly
-        if method == 'flow':
-            contours, stats = trace_flow_lines(luminance, sx, sy, levels, lum_mix)
-        else:
-            if method == 'wave':
-                field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix, diamond)
-            elif method == 'march':
-                field, f_min, f_max = build_march_field(luminance, sx, sy, lum_mix)
+        # Field-construction method (each reads its own module-constant knobs, which
+        # _apply_knobs temporarily overrides from the request form):
+        #   contour — uniform Manhattan+luminance field, marching squares
+        #   wave    — L1-diamond field with luminance relief, marching squares
+        #   march   — 4-connected weighted-distance (marching waves), marching squares
+        #   flow    — gradient streamlines with a directional carrier, traced directly
+        with _apply_knobs(method):
+            if method == 'flow':
+                contours, stats = trace_flow_lines(luminance, sx, sy, levels, lum_mix)
             else:
-                field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
-            contours, stats = extract_contours(field, levels, f_min, f_max)
+                if method == 'wave':
+                    field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix)
+                elif method == 'march':
+                    field, f_min, f_max = build_march_field(luminance, sx, sy, lum_mix)
+                else:
+                    field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
+                contours, stats = extract_contours(field, levels, f_min, f_max)
         stats['method'] = method
 
         contours = smooth_contours(contours, smooth)

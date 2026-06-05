@@ -53,6 +53,7 @@ class _SpatialHash:
 FLOW_ANGLE = 20.0      # carrier direction in degrees (0 = horizontal waves)
 FLOW_CARRIER = 0.6     # 0 = pure image tangent; 1 = carrier fully dominates flat areas
 FLOW_CARRIER_MAG = 6.0 # gradient magnitude at which the image fully overrides the carrier
+FLOW_SIGMA = 3.0       # base blur for the tangent field (higher => smoother, longer lines)
 FLOW_TONE_DENSITY = 0.6  # darkness -> tighter line spacing (denser lines in dark regions,
                          # e.g. the visor). 0 = even spacing everywhere; 0.6 packs darks
                          # to ~40% of the base separation. The artist's output is dense
@@ -108,7 +109,7 @@ def _sample(field_x, field_y, x, y):
 
 
 def trace_flow_lines(luminance, seed_x, seed_y, n_levels, lum_mix=1.0,
-                     sigma=3.0, max_lines=4000):
+                     sigma=None, max_lines=4000):
     """Trace evenly-spaced streamlines through the image tangent field.
 
     Args:
@@ -121,6 +122,8 @@ def trace_flow_lines(luminance, seed_x, seed_y, n_levels, lum_mix=1.0,
         (contours, stats) — same shapes as engine.contour.extract_contours.
     """
     H, W = luminance.shape
+    if sigma is None:
+        sigma = FLOW_SIGMA
     # More smoothing when lum_mix is high → calmer, longer flow lines.
     tx, ty, mag = _tangent_field(luminance, sigma * (0.5 + lum_mix))
 

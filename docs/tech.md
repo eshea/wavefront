@@ -17,8 +17,13 @@ Python 3.9+. Dev deps in `requirements.txt`; run inside `.venv`.
 ## Request flow
 
 ```
-Browser (templates/index.html + static/app.js)
-   │  POST /process  (multipart: image + levels, smooth, lum_mix, wt_range, seed_x/y, method)
+Browser (templates/index.html)
+   │  GET  /config   → method list + per-method knob registry (min/max/default) that
+   │                   drives the UI sliders (one source of truth: app.py METHOD_KNOBS)
+   │  POST /process  (multipart: image + levels, smooth, lum_mix, wt_range, seed_x/y,
+   │                   method, + the active method's knobs e.g. wave_relief, flow_carrier…)
+   │                   app.py._apply_knobs temporarily overrides the engine module
+   │                   constants from those form values for the request, then restores.
    ▼
 app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    │
