@@ -42,6 +42,10 @@ term peaks at `d_diag`≈0.53). Your knobs (all in `engine/field.py`,
 - `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG` — luminance blur near / far from the seed.
 - `WAVE_FAR` — far-field ripple multiplier (how much the background warps).
 - `WAVE_INNER` / `WAVE_OUTER` — relief-fade radii (seed → background).
+- `TONE_GAMMA` — tonal pre-shaping (CONTOUR-V STUDIO control): <1 LIFTS shadows
+  (opens up over-dense dark regions — measured a face 85→98 at 0.6); >1 darkens mids.
+- `TONE_CONTRAST` — tonal contrast about mid-grey (>1 = sharper light/dark separation).
+- `TONE_INVERT` — ≥0.5 = dark-first (flip the tonal response; strong for portraits).
 - render params: `lum_mix`, `levels` (density; 111 = CONTOUR-V CORE's CONTOURS count).
 Tune ONE per tick (see `loop/IDEAS.md` menu). `method=flow/contour/march` and their
 FLOW_*/FIELD_*/MARCH_* constants are PARKED — they don't affect the wave render.

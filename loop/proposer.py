@@ -79,6 +79,10 @@ in engine/field.py change the output:
   - WAVE_SIGMA_FACE / WAVE_SIGMA_BG  luminance blur near / far from the seed.
   - WAVE_FAR        far-field ripple multiplier (background warp).
   - WAVE_INNER / WAVE_OUTER  relief-fade radii (seed -> background).
+  - TONE_GAMMA      tonal pre-shaping: <1 LIFTS shadows (opens up over-dense dark
+                    regions — measured woman 85->98 at 0.6); >1 darkens mids.
+  - TONE_CONTRAST   tonal contrast about mid-grey (>1 = sharper light/dark).
+  - TONE_INVERT     >=0.5 = dark-first (flip tonal response; strong for portraits).
   - the render passes levels=111, lum_mix=0.8 (111 = CONTOUR-V CORE's CONTOURS
     density; the warped relief breaks up the grid so dense lines don't moiré, and
     the 780px raster resolves them).

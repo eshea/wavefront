@@ -36,6 +36,16 @@ baselines/experiments** — summarized at the end, not the canonical path.
      L[y,x] = 0.299 * R + 0.587 * G + 0.114 * B
      (ITU-R BT.601 standard)
 
+  4. Tonal pre-shaping (`shape_tone`, CONTOUR-V STUDIO "Input & Tonal Control").
+     Applied to luminance before the field, so it shapes WHICH tones get contour
+     density. Identity at defaults (existing renders unchanged). Constants in
+     `engine/field.py`, applied to `wave` and `contour`:
+
+       L = contrast_about_mid(L, TONE_CONTRAST)   # >1 sharper light/dark
+       L = L ** TONE_GAMMA                         # <1 lifts shadows (de-clumps
+                                                   #   over-dense dark regions)
+       if TONE_INVERT >= 0.5: L = 255 - L          # dark-first (portraits)
+
 ## Step 2: Adaptive Luminance Blur (zoned by seed distance)
 
   The wave field blurs luminance differently near vs. far from the seed — light

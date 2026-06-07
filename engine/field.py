@@ -65,6 +65,35 @@ FIELD_SHADOW_LIFT = 60.0     # raise dark pixels toward this floor so heavy shad
                              # makeup don't pile contours into a blob (0 = off)
 
 
+# --- Shared tonal pre-shaping (CONTOUR-V STUDIO "Input & Tonal Control"). Applied
+# to luminance BEFORE field construction, so it shapes which tones get contour
+# density. IDENTITY at defaults (gamma=contrast=1, invert=0) — existing renders are
+# unchanged. The UI / ralph loop tune these (read as module globals at call time). ---
+TONE_GAMMA = 1.0      # >1 darkens mids (more contour activity in shadows/mids); <1 lifts them
+TONE_CONTRAST = 1.0   # tonal contrast about mid-grey; >1 = sharper light/dark separation
+TONE_INVERT = 0.0     # >=1 => dark-first: flip the tonal response (portraits / high-contrast)
+
+
+def shape_tone(luminance):
+    """Apply contrast / gamma / invert to luminance (0..255 -> 0..255).
+
+    Reads the TONE_* module globals at call time (so UI/loop overrides take effect).
+    A no-op when gamma==contrast==1 and invert<1, preserving prior behavior.
+    """
+    c, g, inv = TONE_CONTRAST, TONE_GAMMA, TONE_INVERT
+    if c == 1.0 and g == 1.0 and inv < 0.5:
+        return luminance
+    x = luminance.astype(np.float32) / 255.0
+    if c != 1.0:                                  # contrast about mid-grey
+        x = (x - 0.5) * c + 0.5
+    x = np.clip(x, 0.0, 1.0)
+    if g != 1.0:                                  # gamma
+        x = np.power(x, g)
+    if inv >= 0.5:                                # dark-first invert (toggle: >=0.5 on)
+        x = 1.0 - x
+    return (x * 255.0).astype(np.float32)
+
+
 def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
     """
     Build the scalar field used for isoline extraction — the reverse-engineered
@@ -92,6 +121,7 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
         field_max: float
     """
     H, W = luminance.shape
+    luminance = shape_tone(luminance)   # tonal pre-shaping (gamma/contrast/invert)
 
     # Uniform preprocessing (same everywhere — this is the key fix vs. the old ring).
     lum_pre = gaussian_filter(luminance, sigma=FIELD_DENOISE_SIGMA)
@@ -159,6 +189,7 @@ def build_wave_field(luminance, seed_x, seed_y, lum_mix=1.0, diamond=None,
     relief = WAVE_RELIEF if relief is None else relief
     far = WAVE_FAR if far is None else far
     H, W = luminance.shape
+    luminance = shape_tone(luminance)   # tonal pre-shaping (gamma/contrast/invert)
 
     # Adaptive luminance blur: light near the seed (keep feature detail), heavy
     # far away (kill texture) — same idea build_field uses.

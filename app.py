@@ -33,20 +33,29 @@ METHODS = ('contour', 'wave', 'flow', 'march')  # contour = classic isolines (de
 # churn, and it mirrors exactly what the ralph loop tunes. THRESHOLD_POWER (level
 # spacing) applies to every isoline method (contour/wave/march) but not flow.
 _THRESH = ('threshold_power', ec, 'THRESHOLD_POWER', 0.6, 3.0)
+# Shared tonal pre-shaping (CONTOUR-V STUDIO "Input & Tonal Control"). Identity at
+# defaults; shapes which tones get contour density. Applies to wave + contour.
+_TONE = [
+    ('tone_gamma',    ef, 'TONE_GAMMA',    0.4, 2.5),
+    ('tone_contrast', ef, 'TONE_CONTRAST', 0.5, 2.5),
+    ('tone_invert',   ef, 'TONE_INVERT',   0.0, 1.0),
+]
 METHOD_KNOBS = {
     'contour': [
         ('field_denoise_sigma', ef, 'FIELD_DENOISE_SIGMA', 0.0, 25.0),
         ('field_shadow_lift',   ef, 'FIELD_SHADOW_LIFT',   0.0, 150.0),
+        *_TONE,
         _THRESH,
     ],
     'wave': [
         ('wave_diamond',     ef, 'WAVE_DIAMOND',     0.0, 1.0),
-        ('wave_relief',      ef, 'WAVE_RELIEF',      0.0, 1.5),
+        ('wave_relief',      ef, 'WAVE_RELIEF',      0.0, 6.0),
         ('wave_far',         ef, 'WAVE_FAR',         0.0, 1.0),
         ('wave_sigma_face',  ef, 'WAVE_SIGMA_FACE',  2.0, 20.0),
         ('wave_sigma_bg',    ef, 'WAVE_SIGMA_BG',    5.0, 50.0),
         ('wave_inner',       ef, 'WAVE_INNER',       0.0, 0.5),
         ('wave_outer',       ef, 'WAVE_OUTER',       0.3, 1.3),
+        *_TONE,
         _THRESH,
     ],
     'march': [
