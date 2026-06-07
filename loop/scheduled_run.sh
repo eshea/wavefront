@@ -2,7 +2,7 @@
 # loop/scheduled_run.sh — one self-contained unattended ralph run driven ENTIRELY
 # by the local LLM (no Claude Code quota):
 #   - claude -p is routed to the litellm proxy -> neuromancer vLLM (Qwen3.5-122B)
-#   - the visual judge also uses neuromancer (judge.py default)
+#   - scoring is deterministic (loop/dscore.py) — no vision backend needed
 #   - caffeinate keeps the Mac awake for the duration
 #
 # Budget (the agreed "short" run; override via env):

@@ -40,26 +40,27 @@ mv "${out_dir}/iter_000.stats.json" "$out_stats"
 rm -f "${out_dir}/iter_000.svg"
 
 score_line=$("$PY" loop/score.py --output "$out_png" --reference "$REFERENCE" --stats-json "$out_stats")
-judge_line=$("$PY" loop/judge.py --output "$out_png" --reference "$REFERENCE" \
-  --samples "${JUDGE_SAMPLES:-1}" 2>>loop/log/score_errors.log)
+# Deterministic score against the holdout's OWN source (a true matched pair).
+dscore_line=$("$PY" loop/dscore.py --output "$out_png" --source "$INPUT" \
+  2>>loop/log/score_errors.log)
 
-echo "$score_line" | TS="$ts" JUDGE="$judge_line" "$PY" -c "
+echo "$score_line" | TS="$ts" DSCORE="$dscore_line" "$PY" -c "
 import json, sys, os
 rec = json.loads(sys.stdin.read())
 rec['holdout'] = True
 rec['ts_run'] = os.environ['TS']
-judge = json.loads(os.environ['JUDGE']) if os.environ.get('JUDGE','').strip() else {}
-for k in ('judge_score','judge_notes','judge_checks','judge_spread','judge_samples','model','judge_backend'):
-    if k in judge:
-        rec[k] = judge[k]
+d = json.loads(os.environ['DSCORE']) if os.environ.get('DSCORE','').strip() else {}
+for k in ('d_score','d_fidelity','d_style','d_r','d_ink','d_peakedness'):
+    if k in d:
+        rec[k] = d[k]
 print(json.dumps(rec))
 " >> loop/holdout_metrics.jsonl
 
 iou=$(echo "$score_line" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["edge_iou"])')
-jscore=$(echo "$judge_line" | "$PY" -c 'import json,sys
-try: print(json.load(sys.stdin).get("judge_score","?"))
+dscore=$(echo "$dscore_line" | "$PY" -c 'import json,sys
+try: print(json.load(sys.stdin).get("d_score","?"))
 except Exception: print("?")')
-echo "[holdout] result: edge_iou=$iou (target > 0.02) · judge=$jscore"
+echo "[holdout] result: edge_iou=$iou (target > 0.02) · d_score=$dscore"
 
 if "$PY" -c "import sys; sys.exit(0 if $iou > 0.02 else 1)"; then
   echo "[holdout] PASS — engine produces non-trivial holdout output"; exit 0

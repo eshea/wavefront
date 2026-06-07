@@ -17,7 +17,7 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/contour_space_pre.jpg` (astronaut helmet) | `examples/contour_space_post.webp` — the artist's actual CONTOUR-V output (a CLEAN, high-res, truly MATCHED pair; flowing-wave look) | centered seed, levels 90, method=wave/march |
+| `examples/space/space-source.jpg` (astronaut helmet) | `examples/space/space-output-1.jpeg` — the artist's actual CONTOUR-V output (a CLEAN, high-res, truly MATCHED pair; flowing-wave look). The deterministic scorer compares your render to the SOURCE; this is what a ~95 looks like. | centered seed, levels 90, method=flow |
 
 NOTE: the old `contour_woman_*` set is NOT a matched pair — the woman input and the
 `contour_woman_lineart`/`post*` targets are DIFFERENT subjects, so resemblance was
@@ -52,37 +52,44 @@ want to check for overfitting.
 ## QUANTITATIVE SIGNAL (read before deciding)
 
 After each tick, `loop/score_tick.sh` runs automatically and appends
-one JSON line to `loop/metrics.jsonl` with three numbers per output:
+one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
+(`loop/dscore.py`) — no LLM, no backend, reproducible run to run:
 
-- `judge_score` (0–100, **primary metric**) — a single DETERMINISTIC temp-0
-  read from a local vision model (`judge.py`) that directly compares the render
-  to the REFERENCE. The score is derived from two harsh 0–10 ratings —
-  `diamond_match` (same nested-diamond lattice as the reference) and
-  `resemblance` (could it pass as the artist's own output) — plus a `face` gate,
-  via `score_from_checks`. It is HARSH and reference-calibrated: a genuine artist
-  output scores ~90–100, current attempts ~5–25, so there is real headroom to
-  climb (not the old saturated ~92). `judge_checks` shows the two ratings + face.
-  `judge_gap` is the single most important change to look more like the reference.
-- `ink_coverage` (0–1) — non-white fraction. Density co-signal + guard
-  against degenerate near-solid / near-blank output.
-- `ssim`, `edge_iou` (0–1) — pixel co-signals only; near-flat, don't chase.
-- `path_fit` (0–1) — closeness to reference path count (452). Sanity.
+- `d_score` (0–100, **primary metric**) — how well the render re-expresses its
+  SOURCE as flowing contour lines. It compares the output to its **own source**
+  (the canonical helmet, recorded in the render's `stats.json`) at a coarse
+  scale. Two parts:
+  - `d_fidelity` — source-fidelity: lines dense/bent where the source has edges
+    and tone, clean where it's flat → the subject stays recognisable. This is
+    the discriminating signal. (`d_r` = the raw source/output correlation.)
+  - `d_style` — does it look like the VEX-LINE family at all: dominant line
+    spacing (`d_freq_peak`, `d_peakedness`), ink band (`d_ink`), orientation.
+  - **diamond term** (`d_diamond`, from `d_diag`) — a strong multiplicative factor
+    that rewards the **±45° nested-diamond aesthetic** (the `examples/woman`
+    output-4 look: L1 contours run diagonally) and **penalizes axis-aligned
+    flowing waves**. This is why `method=flow` (horizontal carrier) now scores
+    LOW — the target is diamonds. `d_diag` ≈ 0.50–0.57 is the artist band;
+    ≈ 0.28 (axis-aligned) and ≈ 0.86 (over-regular moiré) are both penalised.
+  Calibrated so the artist's good outputs score ~95 and degenerate output
+  (blank/solid/blob/noise) ~0. Current engine attempts have real headroom.
+- `ink_coverage`, `ssim`, `edge_iou`, `path_fit` — legacy pixel co-signals only;
+  near-flat across good/bad, recorded but **don't chase them**.
 
 **Before deciding what to try this tick**, run:
 ```
-tail -10 loop/metrics.jsonl | jq -c '{iter, judge_score, judge_gap, ink_coverage}'
+tail -10 loop/metrics.jsonl | jq -c '{iter, d_score, d_fidelity, d_style, d_ink}'
 ```
-`judge_gap` is the judge's stated **single biggest difference from the
-reference** — this is your steering signal. If judge_score has been flat or
-dropping across the last 3-5 ticks, your hypotheses aren't working — try
-something QUALITATIVELY different (a different idea category, or revert).
+Look at WHICH part is low. Low `d_fidelity` → the lines don't track the source
+(subject lost / density not tone-modulated) — change how the field follows the
+image. Low `d_style` → it doesn't read as line art (check `d_freq_peak` ≈ 6–7,
+`d_peakedness`, `d_ink`). If `d_score` has been flat or dropping across the last
+3–5 ticks, your hypotheses aren't working — try something QUALITATIVELY different
+(a different idea category, or revert).
 
-Your job: raise the `judge_score` median toward the diamond reference,
-tick by tick. Scores are RELATIVE to the current judge backend — aim to
-beat the recent best on the same backend. A deterministic guard
-(`loop/guard_tick.sh`) auto-commits a passing tick and auto-reverts a
-regression, but still `git checkout -- engine/` your own change before
-exiting if you can see it made things worse.
+Your job: raise `d_score` tick by tick toward the artist's ~95. A deterministic
+guard (`loop/guard_tick.sh`) auto-commits a passing tick and auto-reverts a
+regression (absolute floor + relative drop), but still `git checkout -- engine/`
+your own change before exiting if you can see it made things worse.
 
 **Include the latest score line in your log entry.** Use `tail -1
 loop/metrics.jsonl` after `score_tick.sh` runs.
@@ -92,16 +99,17 @@ loop/metrics.jsonl` after `score_tick.sh` runs.
 ## THE GOAL: REPLICATE THE ARTIST'S EXAMPLES
 
 The north star is always to make the canonical output **pass for one of the
-artist's own output** for the canonical input — `examples/contour_space_post.webp`:
-flowing wave contours that bend around the helmet, dense where the image is dark
-(the visor), sparse/clean in the bright sky and desert. The judge scores closeness
-to THAT matched target and tells you the `judge_gap`. Genuine replication scores
-~90; current attempts ~5–25 — closing that gap is the job.
+artist's own output** for the canonical input — `examples/space/space-output-1.jpeg`
+(the matched output for `examples/space/space-source.jpg`): flowing wave contours
+that bend around the helmet, dense where the image is dark (the visor),
+sparse/clean in the bright sky and desert. `d_score` measures how well the render
+re-expresses the SOURCE that way; the artist's own output scores ~95 — closing the
+gap to it is the job.
 
 ## BREADTH FIRST — DO NOT HILL-CLIMB
 
 This loop's failure mode is nudging one constant up and down forever. Avoid it:
-- Steer by the latest **`judge_gap`** (what most differs from the reference), but
+- Steer by which part of `d_score` is low (`d_fidelity` vs `d_style`), but
   explore **DIVERSE ways to close it** — not the same knob each time. E.g. if the
   gap is "no diamond / too dense", a true fix might be a new field formula, a
   different distance metric, a new `method=`, equalization, or level spacing —
@@ -167,14 +175,15 @@ source .venv/bin/activate
 
 Always use this helper rather than hand-rolling a render — it guarantees
 every tick renders identical settings (centered seed, levels 90,
-method=wave) and writes the stats.json without which `path_fit` stays null.
+method=flow) and writes the stats.json (which records the `source` the
+deterministic scorer compares against).
 
 Then view your output and the reference visually:
 
 ```
 # In your prompt, use Read on both:
 Read loop/output/iter_NNN.png
-Read examples/contour_space_post.webp
+Read examples/space/space-output-1.jpeg
 ```
 
 Read returns images visually. Look at them and compare specifically:
@@ -200,16 +209,16 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (helmet, centered seed, levels 90, method=wave)
+**Test:** canonical (helmet, centered seed, levels 90, method=flow)
 - output: `loop/output/iter_NNN.svg` ({stats})
-- reference: `examples/contour_space_post.webp`
+- source: `examples/space/space-source.jpg`
 - visual comparison: {what you saw — be specific}
 
-**Score:** judge=NN ssim=0.0NNN edge_iou=0.NNNN path_fit=0.NN
-            · vs last 3 avg: judge ΔNN
+**Score:** d_score=NN (fid=0.NNN style=0.NNN) ink=0.NN
+            · vs last 3 avg: d_score ΔNN
 
 **Result:** better / same / worse · vs. reference: {closer / further /
-neutral}  · vs. iter_014 (anchor 95): {N points away}
+neutral}  · vs. artist good output (~95): {N points away}
 
 **Next:** {hypothesis for next tick, or "review" if unclear}
 ```

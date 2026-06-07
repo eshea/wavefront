@@ -7,7 +7,7 @@ loop, over-works (edits many files, self-scores, never stops). So here the
 HARNESS drives and the model does the one thing it's reliable at: propose ONE
 edit. Per tick we:
   1. render the CURRENT code so the model sees the real output,
-  2. give the model context (recent judge_score+judge_gap, IDEAS, the editable
+  2. give the model context (recent d_score: fidelity+style, IDEAS, the editable
      files) + the current render + the reference image,
   3. get ONE edit (HYPOTHESIS/CATEGORY/FILE/SEARCH/REPLACE) — retrying only to
      get a VALID applicable edit (max 3 calls), never to "keep going",
@@ -61,8 +61,8 @@ def recent_metrics(n=6):
     rows = [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
     out = []
     for r in rows[-n:]:
-        out.append(f"iter {r.get('iter')}: judge={r.get('judge_score')} "
-                   f"gap={r.get('judge_gap','')!r}")
+        out.append(f"iter {r.get('iter')}: d_score={r.get('d_score')} "
+                   f"fid={r.get('d_fidelity')} style={r.get('d_style')}")
     return "\n".join(out) or "（none yet）"
 
 
@@ -85,7 +85,7 @@ PARKED methods (wave/contour), NOT rendered now. Edit ONE FLOW_* constant per ti
 
 def build_user_text():
     parts = [ACTIVE_NOTE, "",
-             "# Recent results (judge_score + judge_gap)", recent_metrics(), ""]
+             "# Recent results (d_score: fidelity + style)", recent_metrics(), ""]
     parts += ["# Idea backlog (loop/IDEAS.md)",
               (REPO / "loop" / "IDEAS.md").read_text(), ""]
     parts += ["# Editable files (copy SEARCH text VERBATIM from here)"]

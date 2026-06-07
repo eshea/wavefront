@@ -10,7 +10,7 @@
 | Image I/O | Pillow |
 | Export | hand-built SVG strings (`engine/export.py`; `svgwrite` listed but the fast path emits strings directly) |
 | Frontend | vanilla JS + HTML/CSS (`static/`, `templates/index.html`) |
-| Tuning loop | Bash + `claude -p` + a local vision LLM judge (`loop/`) |
+| Tuning loop | Bash + `claude -p` + a deterministic image-processing scorer (`loop/dscore.py`) |
 
 Python 3.9+. Dev deps in `requirements.txt`; run inside `.venv`.
 
@@ -67,15 +67,20 @@ the preview canvas).
 
 Self-driving improvement loop (Karpathy-style: dumb outer shell, smart inner
 agent). `ralph.sh` repeatedly invokes `claude -p`; each tick reads
-`loop/PROMPT.md`, edits ONE knob, renders the canonical test
-(`render_tick.sh` → `/process` with baked settings), scores it
-(`score_tick.sh`: pixel metrics `score.py` + visual judge `judge.py`, appended
-to `loop/metrics.jsonl`), and logs to `EXPERIMENT_LOG.md`. A held-out set
-(`loop/holdout/`) guards overfitting — **never read, score, or train against it.**
+`loop/PROMPT.md`, edits ONE knob, renders the canonical test in-process
+(`render_tick.sh` → `loop/render.py`, baked settings), scores it
+(`score_tick.sh`: deterministic `dscore.py` + legacy pixel co-signals `score.py`,
+appended to `loop/metrics.jsonl`), gates on the result (`guard_tick.sh`), and
+logs to `EXPERIMENT_LOG.md`. A held-out set (`loop/holdout/`) guards overfitting
+— **never read, score, or train against it.**
 
-⚠ Judge scores are **backend-dependent** (a good render ≈ 85 on vLLM-Qwen3 vs
-≈ 40–55 on llama.cpp); only compare ticks with the same `judge_backend`. See
-`loop/README.md` for budgets, stop controls, and cost.
+Scoring is **deterministic** (`dscore.py`, `d_score` 0–100): it compares the
+output to its **own source** at a coarse scale — source-fidelity (subject
+recognizable / density tone-modulated) + style (line-spacing FFT, ink band,
+orientation). No network, no backend, reproducible. Calibrated so the artist's
+good outputs (`examples/space`, `examples/woman`) score ~95 and degenerate output
+~0 (`loop/tests/dscore_calib.sh` is the acceptance gate). See `loop/README.md`
+for budgets, stop controls, and cost.
 
 ## Operational notes
 

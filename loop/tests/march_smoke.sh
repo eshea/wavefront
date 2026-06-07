@@ -24,7 +24,7 @@ except Exception as e:
     sys.exit(1)
 
 # 1. Field is finite, right shape, and a 4-connected geodesic (min at the seed).
-rgb, _, proc = load_and_preprocess("examples/contour_space_pre.jpg")
+rgb, _, proc = load_and_preprocess("examples/space/space-source.jpg")
 lum = to_luminance(rgb)
 sx, sy = proc[0] // 2, proc[1] // 2
 field, fmin, fmax = build_march_field(lum, sx, sy, lum_mix=0.8)
