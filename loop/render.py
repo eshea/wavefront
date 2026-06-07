@@ -44,7 +44,7 @@ from engine.march import build_march_field  # noqa: E402
 METHODS = ("contour", "wave", "flow", "march")
 
 
-def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
+def render(iter_num, method="wave", levels=60, smooth=0.0, lum_mix=0.8,
            wt_range=0.0, seed_x=None, seed_y=None,
            input_path=REPO / "examples" / "space" / "space-source.jpg",
            png_width=434, out_dir=REPO / "loop" / "output"):
@@ -97,7 +97,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("iter", help="iteration number (used to name artifacts)")
     p.add_argument("--method", default="wave", choices=METHODS)
-    p.add_argument("--levels", type=int, default=90)
+    p.add_argument("--levels", type=int, default=60)
     p.add_argument("--smooth", type=float, default=0.0)
     p.add_argument("--lum-mix", type=float, default=0.8)
     p.add_argument("--wt-range", type=float, default=0.0)

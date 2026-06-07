@@ -114,8 +114,15 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
 # visible "limited circle" boundary the narrow (0.20/0.42) zone produced, giving a
 # near-uniform field while still easing relief outward (a narrow zone, e.g. the
 # old 0.20/0.42, made the relief fall off across a visible circle).
-WAVE_DIAMOND = 0.12     # extra crisp-diamond bias: 0 = full ripple, 1 = ignore the face
-WAVE_RELIEF = 0.65      # luminance ripple amplitude (× lum_mix). Low => diamonds dominate
+WAVE_DIAMOND = 0.0      # extra crisp-diamond bias: 0 = full ripple, 1 = ignore the face
+WAVE_RELIEF = 2.8       # luminance ripple amplitude (× lum_mix). This is the WARP
+                        # strength that bends the L1 diamonds around image features.
+                        # At ~0.65 the diamonds stayed too geometric (a regular
+                        # ±45° moiré, score ~14); ~2.8 makes them warp organically
+                        # so the subject emerges as nested diamonds (the CONTOUR-V /
+                        # output-4 look — diag≈0.5, the deterministic scorer's
+                        # diamond target). Smooth subjects (the helmet) want a bit
+                        # more, detailed faces a bit less — the loop tunes this.
 WAVE_SIGMA_FACE = 8.0   # luminance blur near the seed (preserves feature wrap)
 WAVE_SIGMA_BG = 30.0    # luminance blur far from the seed (suppresses hair/bg texture)
 WAVE_FAR = 0.35         # far-field ripple multiplier (low => clean bg; raised so the

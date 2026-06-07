@@ -67,20 +67,22 @@ def recent_metrics(n=6):
 
 
 ACTIVE_NOTE = """# ACTIVE SURFACE — what actually affects the scored render
-The canonical render uses **method=flow** (engine/flow.py — evenly-spaced
-streamlines that flow ALONG the image, the match for the helmet target's waves).
-ONLY these module constants in engine/flow.py change the output:
-  - FLOW_ANGLE       carrier wave direction in degrees (0 = horizontal waves)
-  - FLOW_CARRIER     0..1: how much the carrier straightens FLAT areas (sky).
-                     higher => cleaner straight waves; lower => follows image more
-  - FLOW_CARRIER_MAG gradient magnitude at which the image overrides the carrier
-  - FLOW_TONE_DENSITY 0..1: darkness -> tighter line spacing (denser shadows /
-                     the visor). higher => denser dark regions
-  - the trace_flow_lines defaults: sigma (tangent blur; higher => smoother/longer
-    lines) and the n_levels->d_sep density mapping.
-  - the render passes levels=90, lum_mix=0.8.
-IGNORE the WAVE_*/FIELD_* constants and build_field/build_wave_field — those are
-PARKED methods (wave/contour), NOT rendered now. Edit ONE FLOW_* constant per tick."""
+The canonical render uses **method=wave** (engine/field.py build_wave_field — an
+L1-Manhattan diamond field warped by luminance relief: the CONTOUR-V / output-4
+nested-DIAMOND look the deterministic scorer targets). ONLY these module constants
+in engine/field.py change the output:
+  - WAVE_RELIEF     warp strength: how much the image bends the diamonds. Too low
+                    => stiff geometric diamonds (moiré, low diamond score); too high
+                    => over-warped (diamonds break up, diag drops below ~0.5). The
+                    scorer's diamond term peaks at diag≈0.53 — tune toward it.
+  - WAVE_DIAMOND    0..1 crisp-diamond bias: 0 = full ripple, 1 = ignore the image.
+  - WAVE_SIGMA_FACE / WAVE_SIGMA_BG  luminance blur near / far from the seed.
+  - WAVE_FAR        far-field ripple multiplier (background warp).
+  - WAVE_INNER / WAVE_OUTER  relief-fade radii (seed -> background).
+  - the render passes levels=60, lum_mix=0.8 (levels=60 keeps diamonds large
+    enough that the 434px raster doesn't alias into a moiré).
+IGNORE the FLOW_*/FIELD_* constants and build_field/trace_flow_lines — those are
+PARKED methods (flow/contour), NOT rendered now. Edit ONE WAVE_* constant per tick."""
 
 
 def build_user_text():

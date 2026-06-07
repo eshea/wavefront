@@ -28,20 +28,23 @@ The astronaut helmet is the **canonical test**, baked into `loop/render_tick.sh`
 VEX-LINE face, `ref_contourv_core`, Motoko, and the classical-woman lineart) with
 the Read tool — they are output-only (no matched inputs), pure visual targets.
 
-### WHAT YOU ARE TUNING NOW: the FLOW streamline field (`engine/flow.py`)
-The canonical render uses **`method=flow`** (`render_tick.sh`): evenly-spaced
-streamlines that flow ALONG the image (Jobard–Lefebvre), with a directional
-CARRIER so flat regions (sky) flow in clean straight waves and a TONE-density term
-so dark regions (the visor) pack denser. This matches the helmet target's flowing
-waves. Your knobs (all in `engine/flow.py`):
-- `FLOW_ANGLE` — carrier wave direction in degrees (0 = horizontal waves).
-- `FLOW_CARRIER` — 0..1, how much the carrier straightens flat areas (higher = cleaner waves).
-- `FLOW_CARRIER_MAG` — gradient magnitude at which the image overrides the carrier.
-- `FLOW_TONE_DENSITY` — 0..1, darkness → tighter spacing (denser visor/shadows).
-- `trace_flow_lines` defaults: `sigma` (tangent blur; higher = smoother/longer lines).
-- render params: `lum_mix`, `levels` (density).
-Tune ONE per tick (see `loop/IDEAS.md` menu). `method=wave/contour/march` and their
-WAVE_*/FIELD_*/MARCH_* constants are PARKED — they don't affect the flow render.
+### WHAT YOU ARE TUNING NOW: the WAVE diamond field (`engine/field.py`)
+The canonical render uses **`method=wave`** (`render_tick.sh`): an L1-Manhattan
+**diamond** field (nested diamonds radiating from the seed) warped by a luminance
+**relief** so the subject emerges as warped diamonds. This is the CONTOUR-V /
+**output-4** nested-diamond aesthetic the deterministic scorer targets (its diamond
+term peaks at `d_diag`≈0.53). Your knobs (all in `engine/field.py`,
+`build_wave_field`):
+- `WAVE_RELIEF` — warp strength (how hard the image bends the diamonds). Too low =
+  stiff geometric diamonds / moiré (low `d_diamond`); too high = over-warped, the
+  diamonds break up and `d_diag` falls below ~0.5. Tune toward `d_diag`≈0.53.
+- `WAVE_DIAMOND` — 0..1 crisp-diamond bias: 0 = full ripple, 1 = ignore the image.
+- `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG` — luminance blur near / far from the seed.
+- `WAVE_FAR` — far-field ripple multiplier (how much the background warps).
+- `WAVE_INNER` / `WAVE_OUTER` — relief-fade radii (seed → background).
+- render params: `lum_mix`, `levels` (density; 60 avoids the 434px moiré).
+Tune ONE per tick (see `loop/IDEAS.md` menu). `method=flow/contour/march` and their
+FLOW_*/FIELD_*/MARCH_* constants are PARKED — they don't affect the wave render.
 
 **HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
 `loop/holdout/contour_space_post.webp` are the held-out test set. Do

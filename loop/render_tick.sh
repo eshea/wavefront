@@ -12,8 +12,10 @@
 #   iter_NNN.png         — rasterized via rsvg-convert (for Read + judge)
 #   iter_NNN.stats.json  — the stats block (paths, total_points, levels, t_*, grid)
 #
-# Canonical settings: centered seed, levels 90, smooth 0.00, lum_mix 0.8,
-# wt_range 0.0, method=wave (the active L1-diamond field).
+# Canonical settings: centered seed, levels 60, smooth 0.00, lum_mix 0.8,
+# wt_range 0.0, method=wave (the active L1-diamond field — the output-4 diamond
+# look). levels 60 (not 90) keeps the diamonds large enough that the 434px raster
+# doesn't alias them into a moiré.
 #
 # Usage:
 #   ./loop/render_tick.sh <iter_number>
@@ -24,7 +26,7 @@ cd "$(dirname "$0")/.."
 
 iter_num=$((10#${1:?iter number required}))   # force base-10 ('033' is octal otherwise)
 png_width="${PNG_WIDTH:-434}"
-method="${METHOD:-flow}"   # the loop tunes engine/flow.py (streamlines — matches the helmet target)
+method="${METHOD:-wave}"   # the loop tunes engine/field.py build_wave_field (the L1-diamond field — the output-4 look)
 
 # Prefer the project venv python (it has the deps); the loop may invoke this from a
 # subprocess where the venv isn't activated, so don't rely on PATH `python`.
@@ -38,7 +40,7 @@ fi
 
 "$python_bin" loop/render.py "$iter_num" \
   --method "$method" \
-  --levels 90 \
+  --levels 60 \
   --smooth 0.0 \
   --lum-mix 0.8 \
   --wt-range 0.0 \
