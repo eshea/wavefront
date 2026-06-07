@@ -79,8 +79,9 @@ in engine/field.py change the output:
   - WAVE_SIGMA_FACE / WAVE_SIGMA_BG  luminance blur near / far from the seed.
   - WAVE_FAR        far-field ripple multiplier (background warp).
   - WAVE_INNER / WAVE_OUTER  relief-fade radii (seed -> background).
-  - the render passes levels=60, lum_mix=0.8 (levels=60 keeps diamonds large
-    enough that the 434px raster doesn't alias into a moiré).
+  - the render passes levels=111, lum_mix=0.8 (111 = CONTOUR-V CORE's CONTOURS
+    density; the warped relief breaks up the grid so dense lines don't moiré, and
+    the 780px raster resolves them).
 IGNORE the FLOW_*/FIELD_* constants and build_field/trace_flow_lines — those are
 PARKED methods (flow/contour), NOT rendered now. Edit ONE WAVE_* constant per tick."""
 

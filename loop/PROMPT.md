@@ -17,7 +17,7 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/space/space-source.jpg` (astronaut helmet) | `examples/space/space-output-1.jpeg` — the artist's actual CONTOUR-V output (a CLEAN, high-res, truly MATCHED pair; flowing-wave look). The deterministic scorer compares your render to the SOURCE; this is what a ~95 looks like. | centered seed, levels 90, method=flow |
+| `examples/space/space-source.jpg` (astronaut helmet) | `examples/space/space-output-1.jpeg` — the artist's actual CONTOUR-V output (a CLEAN, high-res, truly MATCHED pair; flowing-wave look). The deterministic scorer compares your render to the SOURCE; this is what a ~95 looks like. | centered seed, levels 111, method=wave |
 
 NOTE: the old `contour_woman_*` set is NOT a matched pair — the woman input and the
 `contour_woman_lineart`/`post*` targets are DIFFERENT subjects, so resemblance was
@@ -42,7 +42,7 @@ term peaks at `d_diag`≈0.53). Your knobs (all in `engine/field.py`,
 - `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG` — luminance blur near / far from the seed.
 - `WAVE_FAR` — far-field ripple multiplier (how much the background warps).
 - `WAVE_INNER` / `WAVE_OUTER` — relief-fade radii (seed → background).
-- render params: `lum_mix`, `levels` (density; 60 avoids the 434px moiré).
+- render params: `lum_mix`, `levels` (density; 111 = CONTOUR-V CORE's CONTOURS count).
 Tune ONE per tick (see `loop/IDEAS.md` menu). `method=flow/contour/march` and their
 FLOW_*/FIELD_*/MARCH_* constants are PARKED — they don't affect the wave render.
 
@@ -177,8 +177,8 @@ source .venv/bin/activate
 ```
 
 Always use this helper rather than hand-rolling a render — it guarantees
-every tick renders identical settings (centered seed, levels 90,
-method=flow) and writes the stats.json (which records the `source` the
+every tick renders identical settings (centered seed, levels 111,
+method=wave) and writes the stats.json (which records the `source` the
 deterministic scorer compares against).
 
 Then view your output and the reference visually:
@@ -212,7 +212,7 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (helmet, centered seed, levels 90, method=flow)
+**Test:** canonical (helmet, centered seed, levels 111, method=wave)
 - output: `loop/output/iter_NNN.svg` ({stats})
 - source: `examples/space/space-source.jpg`
 - visual comparison: {what you saw — be specific}
