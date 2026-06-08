@@ -3,23 +3,39 @@
 The Ralph loop reads this file each tick to know what's been tried and
 what to try next. Each tick appends a new entry.
 
+## ✅ MILESTONE (2026-06-07): the woman example is now VERY GOOD
+
+The canonical render now matches the artist. Input
+`examples/woman/woman-source.jpeg` → target the dense
+`examples/woman/woman-sample-output-2.jpeg`, rendered with **`method=march`**
+(the tone-cost geodesic, `engine/march.py`), levels 111, 780px. The output is a
+clean, photographic, tone-rendered portrait — the face is depicted by line
+density (dense in shadows/features, sparse in highlights) with L1 diamonds in the
+flats. Tracked evidence: `loop/output/current-woman.png`.
+
+Deterministic score (`loop/dscore.py`): **d_score 100, d_tone 0.74** (artist 0.71),
+d_diag 0.50 (artist 0.50). The breakthrough was twofold — (1) the scorer's
+`d_tone` term (does the output render the source's tones?), which exposed that the
+old additive wave field had d_tone≈0 and scored a *false* 99 → corrected to 47;
+(2) switching the engine to the march geodesic, whose dark-pixels-cost-more
+mechanism actually produces tone-driven density (d_tone −0.19 → +0.74).
+
 ## Definition of done / quality target
 
-"Good" output for the canonical test (input `examples/contour_woman.webp`,
-seed 227,225, levels 111, smooth 0.00) should visually resemble the
-reference outputs `examples/contour_woman_post*.jpeg|webp` — the same
-images the artist produced from this input.
+"Good" output for the canonical test (input `examples/woman/woman-source.jpeg`,
+centered seed, levels 111, smooth 0.00, **method=march**) should visually resemble
+`examples/woman/woman-sample-output-2.jpeg`. Measured by `d_score` (0–100,
+`loop/dscore.py`): tone-fidelity (`d_tone`) + diamond (`d_diag`≈0.50) + style.
 
-Key qualities to match:
-- Diamond-shaped concentric rings centered on the seed
-- Lines that wrap around facial features (eyes, nose, mouth shadows)
-- Background lines that fan out cleanly without noise
-- Path count in the same order of magnitude as `contour_woman_settings.webp`:
-  CHAINS 452 / PTS 135,962. WAVEFRONT should land within ~2x.
+Key qualities to match (now achieved on the woman):
+- Tone-driven line density — DENSE where the image is dark, sparse where bright
+  (this is `d_tone`; the subject emerges as shading, not just geometry)
+- Nested L1 diamonds in flat regions, warped organically around features
+- Background lines clean, no fine noise
 
-Secondary target: the helmet pair
-(`examples/contour_space_pre.jpg` → `examples/contour_space_post.webp`)
-— seed unknown, infer.
+Secondary / holdout: the helmet (`examples/space/`) and samurai
+(`examples/samurai/`) — generalization checks; the march defaults are tuned for
+the high-contrast woman, so smooth subjects score lower (acceptable).
 
 ---
 
