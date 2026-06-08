@@ -7,7 +7,10 @@ aesthetic on `examples/woman/woman-source.jpeg` (target: the dense
 `woman-sample-output-2.jpeg`). Score = deterministic `d_score`
 (0–100, `loop/dscore.py`): source-fidelity + style + a **diamond factor** that
 rewards the ±45° organic diamonds (`d_diag`≈0.53) and penalizes stiff/axis-aligned
-lines. Canonical currently ~94.
+lines, AND a **tone-fidelity** term (`d_tone`: does the output's local ink density
+reproduce the SOURCE's tones?). The engine baseline is ~**47** (its diamonds are
+too seed-centric and DON'T render the image's tones — `d_tone` is ~0/negative);
+the artist outputs are ~95-100. Raising `d_tone` is the main lever now.
 
 **How to use this each tick:** read the latest metrics (`d_score`, `d_fidelity`,
 `d_style`, `d_diag`, `d_ink`), find the ONE matching symptom below, make that one
@@ -18,6 +21,7 @@ touched a knob and the score didn't move, pick a different symptom.
 
 | If the symptom is… | Change | Current → try |
 |---|---|---|
+| **Output doesn't render the image's TONES** (`d_tone`≈0/negative — density follows the seed diamonds, not where the image is dark; THE main gap) | `WAVE_RELIEF` up (more image-driven warp/density) and/or `TONE_CONTRAST` up | relief 2.8→3.6 / contrast 1.0→1.5 |
 | Diamonds too STIFF/geometric (`d_diag`>0.6, moiré-ish) | `WAVE_RELIEF` up | 2.8 → 3.4 |
 | Diamonds OVER-warped / broken up (`d_diag`<0.45) | `WAVE_RELIEF` down | 2.8 → 2.3 |
 | Dark regions over-dense / muddy shadows (`d_ink` high) | `TONE_GAMMA` down (lifts shadows) | 1.0 → 0.6 |

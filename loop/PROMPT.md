@@ -67,9 +67,12 @@ one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
   SOURCE as flowing contour lines. It compares the output to its **own source**
   (the canonical woman portrait, recorded in the render's `stats.json`) at a coarse
   scale. Two parts:
-  - `d_fidelity` — source-fidelity: lines dense/bent where the source has edges
-    and tone, clean where it's flat → the subject stays recognisable. This is
-    the discriminating signal. (`d_r` = the raw source/output correlation.)
+  - `d_fidelity` — source-fidelity, dominated by **`d_tone`**: SSIM between the
+    output's local ink-density and the SOURCE's darkness — i.e. does the output
+    actually render the image's tones (dense where the image is dark)? This is THE
+    discriminating signal. A seed-centric diamond field that ignores the image has
+    `d_tone`≈0/negative (the current engine baseline ~47); a faithful render is
+    +0.3..+0.9 (artist ~95-100). Raising `d_tone` is the main job.
   - `d_style` — does it look like the VEX-LINE family at all: dominant line
     spacing (`d_freq_peak`, `d_peakedness`), ink band (`d_ink`), orientation.
   - **diamond term** (`d_diamond`, from `d_diag`) — a strong multiplicative factor

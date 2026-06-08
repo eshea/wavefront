@@ -23,7 +23,7 @@
 #   - regression    : d_score < recent_best - GUARD_DROP (relative)
 #
 # Usage:   ./loop/guard_tick.sh <iter_number>
-# Env:     GUARD_FLOOR(60) GUARD_DROP(8) GUARD_DISABLE GUARD_NO_COMMIT
+# Env:     GUARD_FLOOR(30) GUARD_DROP(8) GUARD_DISABLE GUARD_NO_COMMIT
 #          GUARD_NO_COMMIT = no git side effects at all: skips the PASS commit
 #          AND the FAIL revert (use it for manual/dry-run testing).
 set -u
@@ -40,7 +40,9 @@ verdict=$(python3 - "$iter_num" <<'PY'
 import json, os, sys
 
 iter_num = int(sys.argv[1])
-FLOOR = float(os.environ.get("GUARD_FLOOR", 60))   # absolute d_score quality bar
+FLOOR = float(os.environ.get("GUARD_FLOOR", 30))   # absolute d_score floor (reject
+#   degenerate/broken; the current engine baseline ~47 sits above it and the
+#   relative-regression gate does the real work of preventing backsliding)
 DROP  = float(os.environ.get("GUARD_DROP", 8))     # max allowed drop vs recent best
 
 rows = []

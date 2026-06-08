@@ -53,7 +53,8 @@ from skimage.metrics import structural_similarity as ssim
 
 # ── working resolutions ──────────────────────────────────────────────────
 WORK = 384          # square grid for source-fidelity (384 = 48*8, clean pool)
-GRID_N = 48         # coarse cells per side for the fidelity maps
+GRID_N = 48         # coarse cells per side for the saliency/activity maps
+TONE_N = 32         # coarser grid for tonal-structure fidelity (384 = 32*12)
 STYLE_WORK = 512    # square grid for the FFT / style stats
 INK_THRESH = 160    # px < this = "inked" (tolerant of AA / JPEG'd line edges)
 
@@ -160,16 +161,29 @@ def output_activity(out: np.ndarray, n: int = GRID_N) -> np.ndarray:
 
 
 def fidelity(src_work: np.ndarray, out_work: np.ndarray) -> dict:
+    """How faithfully the output renders the SOURCE.
+
+    The dominant term is TONAL-STRUCTURE fidelity: SSIM between the output's local
+    ink-density map and the source's darkness map. This is what separates a render
+    that actually depicts the subject (dense where the image is dark) from a
+    seed-centric diamond field whose density follows the geometry, not the image
+    (the latter's tone map is uncorrelated/anti-correlated — measured ~0 to -0.15,
+    vs +0.27..+0.86 for genuine artist outputs). The old edge-correlation term
+    alone was fooled — both satisfy it — so tone now leads, edge-corr is secondary.
+    """
+    blk = src_work.shape[0] // TONE_N
+    ink = (out_work < INK_THRESH).astype(np.float32)
+    dens = _norm(block_reduce(ink, (blk, blk), np.mean))
+    dark = _norm(block_reduce(255.0 - src_work, (blk, blk), np.mean))
+    tone = float(ssim(dens, dark, data_range=1.0, win_size=7))
+    # secondary: edge/saliency alignment (where the source has detail).
     S = source_saliency(src_work)
     O = output_activity(out_work)
     sf, of = S.ravel(), O.ravel()
-    if sf.std() < 1e-9 or of.std() < 1e-9:
-        r = 0.0
-    else:
-        r = float(np.corrcoef(sf, of)[0, 1])
-    s_so = float(ssim(S, O, data_range=1.0, win_size=7))
-    raw = 0.6 * max(0.0, r) + 0.4 * max(0.0, s_so)
-    return {"r": r, "ssim_so": s_so, "fidelity_raw": raw}
+    r = 0.0 if (sf.std() < 1e-9 or of.std() < 1e-9) \
+        else float(np.corrcoef(sf, of)[0, 1])
+    raw = 0.72 * max(0.0, tone) + 0.28 * max(0.0, r)
+    return {"r": r, "tone": tone, "fidelity_raw": raw}
 
 
 # ── Module B: style ──────────────────────────────────────────────────────
@@ -253,13 +267,13 @@ def score(out_path: Path, src_path: Path, style_only: bool = False) -> dict:
     diam_factor = CALIB["diam_floor"] + (1 - CALIB["diam_floor"]) * st["diamond_score"]
 
     if style_only:
-        fid = {"r": None, "ssim_so": None, "fidelity_raw": None}
+        fid = {"r": None, "tone": None, "fidelity_raw": None}
         combined = st["style_raw"] * gate * diam_factor
     else:
         src_w = load_gray_work(src_path, WORK)
         fid = fidelity(src_w, out_w)
         fid_score = min(1.0, fid["fidelity_raw"] / CALIB["FID_FULL"])
-        combined = (0.55 * fid_score + 0.45 * st["style_raw"]) * gate * diam_factor
+        combined = (0.6 * fid_score + 0.4 * st["style_raw"]) * gate * diam_factor
 
     lo, hi = CALIB["C_LO"], CALIB["C_HI"]
     d = int(round(100 * float(np.clip((combined - lo) / (hi - lo), 0.0, 1.0))))
@@ -269,7 +283,7 @@ def score(out_path: Path, src_path: Path, style_only: bool = False) -> dict:
         else round(fid["fidelity_raw"], 4),
         "d_style": round(st["style_raw"], 4),
         "d_r": None if fid["r"] is None else round(fid["r"], 4),
-        "d_ssim_so": None if fid["ssim_so"] is None else round(fid["ssim_so"], 4),
+        "d_tone": None if fid["tone"] is None else round(fid["tone"], 4),
         "d_freq_peak": st["freq_peak"],
         "d_peakedness": round(st["peakedness"], 3),
         "d_ink": round(st["ink"], 4),
