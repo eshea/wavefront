@@ -17,7 +17,7 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/woman/woman-source.jpeg` (**canonical**) | `examples/woman/woman-sample-output-2.jpeg` — the artist's dense CONTOUR-V output for that input (the "really good" target; see also the low/med/high `woman-sample-output-density-example.jpeg`). The scorer compares your render to the SOURCE. | centered seed, levels 111, method=wave |
+| `examples/woman/woman-source.jpeg` (**canonical**) | `examples/woman/woman-sample-output-2.jpeg` — the artist's dense CONTOUR-V output for that input (the "really good" target; see also the low/med/high `woman-sample-output-density-example.jpeg`). The scorer compares your render to the SOURCE. | centered seed, levels 111, method=march |
 | `examples/space/space-source.jpg` (helmet) | `examples/space/space-output-1.jpeg` — flowing-wave matched pair. Now the **holdout** (generalization check). | — |
 | `examples/samurai/samurai-source.jpg` | `examples/samurai/samurai-output-1.jpeg` — flowing matched pair (busy source). | — |
 
@@ -29,27 +29,26 @@ The woman portrait (`woman-source.jpeg`) is the **canonical test**, baked into `
 VEX-LINE face, `ref_contourv_core`, Motoko, and the classical-woman lineart) with
 the Read tool — they are output-only (no matched inputs), pure visual targets.
 
-### WHAT YOU ARE TUNING NOW: the WAVE diamond field (`engine/field.py`)
-The canonical render uses **`method=wave`** (`render_tick.sh`): an L1-Manhattan
-**diamond** field (nested diamonds radiating from the seed) warped by a luminance
-**relief** so the subject emerges as warped diamonds. This is the CONTOUR-V /
-**output-4** nested-diamond aesthetic the deterministic scorer targets (its diamond
-term peaks at `d_diag`≈0.53). Your knobs (all in `engine/field.py`,
-`build_wave_field`):
-- `WAVE_RELIEF` — warp strength (how hard the image bends the diamonds). Too low =
-  stiff geometric diamonds / moiré (low `d_diamond`); too high = over-warped, the
-  diamonds break up and `d_diag` falls below ~0.5. Tune toward `d_diag`≈0.53.
-- `WAVE_DIAMOND` — 0..1 crisp-diamond bias: 0 = full ripple, 1 = ignore the image.
-- `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG` — luminance blur near / far from the seed.
-- `WAVE_FAR` — far-field ripple multiplier (how much the background warps).
-- `WAVE_INNER` / `WAVE_OUTER` — relief-fade radii (seed → background).
-- `TONE_GAMMA` — tonal pre-shaping (CONTOUR-V STUDIO control): <1 LIFTS shadows
-  (opens up over-dense dark regions — measured a face 85→98 at 0.6); >1 darkens mids.
-- `TONE_CONTRAST` — tonal contrast about mid-grey (>1 = sharper light/dark separation).
-- `TONE_INVERT` — ≥0.5 = dark-first (flip the tonal response; strong for portraits).
-- render params: `lum_mix`, `levels` (density; 111 = CONTOUR-V CORE's CONTOURS count).
-Tune ONE per tick (see `loop/IDEAS.md` menu). `method=flow/contour/march` and their
-FLOW_*/FIELD_*/MARCH_* constants are PARKED — they don't affect the wave render.
+### WHAT YOU ARE TUNING NOW: the MARCH geodesic field (`engine/march.py`)
+The canonical render uses **`method=march`** (`render_tick.sh`): a 4-connected
+**geodesic** (skimage MCP) where each pixel's traversal cost rises with darkness
+and edges, so arrival-time contours BUNCH where the image is dark — **tone-driven
+density that actually renders the image's tones** — while 4-connectivity keeps the
+L1 **diamond** topology. This is what the additive wave field could NOT do (its
+density followed the seed geometry, not the image; `d_tone`≈0). Your knobs (all in
+`engine/march.py`, cost = `MARCH_BASE + MARCH_TONE·lum_mix·dark + MARCH_EDGE·edge`):
+- `MARCH_TONE` — THE tone-fidelity lever: darkness→extra cost→denser lines in
+  shadows. Higher raises `d_tone`. Too high → shadows go solid black (`d_ink`>0.85
+  trips the gate). Currently 4.0.
+- `MARCH_BASE` — diamond dominance / base step cost. LOW (~0.3) lets the image warp
+  the diamonds organically (`d_diag`≈0.50); HIGH gives stiff diamonds (`d_diag`>0.65,
+  penalised). Currently 0.3.
+- `MARCH_EDGE` — edges→extra cost: defines feature boundaries (eyes/nose/jaw). 4.0.
+- `MARCH_CONTRAST` / `MARCH_GAMMA` — tonal pre-shaping of the gray (contrast about
+  mid, then gamma) before the cost. `MARCH_BLUR` — denoise sigma.
+- render params: `lum_mix` (scales MARCH_TONE), `levels` (density; 111 = CORE's count).
+Tune ONE per tick (see `loop/IDEAS.md` menu). `method=wave/flow/contour` and their
+WAVE_*/FLOW_*/FIELD_* constants are PARKED — they don't affect the march render.
 
 **HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
 `loop/holdout/contour_space_post.webp` are the held-out test set. Do
@@ -70,9 +69,9 @@ one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
   - `d_fidelity` — source-fidelity, dominated by **`d_tone`**: SSIM between the
     output's local ink-density and the SOURCE's darkness — i.e. does the output
     actually render the image's tones (dense where the image is dark)? This is THE
-    discriminating signal. A seed-centric diamond field that ignores the image has
-    `d_tone`≈0/negative (the current engine baseline ~47); a faithful render is
-    +0.3..+0.9 (artist ~95-100). Raising `d_tone` is the main job.
+    discriminating signal. The march geodesic drives it positive (canonical
+    `d_tone`≈0.74, artist ~0.71); a field that ignores the image (the old additive
+    wave) had `d_tone`≈0/negative and scored ~47. Keep `d_tone` high.
   - `d_style` — does it look like the VEX-LINE family at all: dominant line
     spacing (`d_freq_peak`, `d_peakedness`), ink band (`d_ink`), orientation.
   - **diamond term** (`d_diamond`, from `d_diag`) — a strong multiplicative factor
@@ -186,7 +185,7 @@ source .venv/bin/activate
 
 Always use this helper rather than hand-rolling a render — it guarantees
 every tick renders identical settings (centered seed, levels 111,
-method=wave) and writes the stats.json (which records the `source` the
+method=march) and writes the stats.json (which records the `source` the
 deterministic scorer compares against).
 
 Then view your output and the reference visually:
@@ -220,7 +219,7 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (woman-source, centered seed, levels 111, method=wave)
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
 - output: `loop/output/iter_NNN.svg` ({stats})
 - source: `examples/woman/woman-source.jpeg`
 - visual comparison: {what you saw — be specific}

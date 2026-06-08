@@ -34,11 +34,15 @@ from skimage.graph import MCP
 
 # --- Tunable knobs for the marching-waves field (the ralph loop edits these the
 # same way it edits the WAVE_* constants). ---
-MARCH_BASE = 1.0        # base per-step cost = diamond dominance. High => crisp
+MARCH_BASE = 0.3        # base per-step cost = diamond dominance. High => crisp
                         # diamonds barely bent by the image; low => image dominates.
-MARCH_TONE = 2.5        # darkness -> extra cost (× lum_mix). Higher => darks bunch
-                        # lines harder (denser shadows / "visor goes black").
-MARCH_EDGE = 1.5        # edge magnitude -> extra cost. Higher => lines pile up and
+                        # Tuned LOW so the image warps the diamonds organically
+                        # (d_diag~0.50, matching the artist) AND tone drives density.
+MARCH_TONE = 4.0        # darkness -> extra cost (× lum_mix). Higher => darks bunch
+                        # lines harder (denser shadows). This is the TONE-FIDELITY
+                        # lever — it's why march renders the image's tones (d_tone
+                        # ~0.74 on the canonical woman vs ~0 for the additive wave).
+MARCH_EDGE = 4.0        # edge magnitude -> extra cost. Higher => lines pile up and
                         # deflect at feature boundaries (eyes/nose/jaw rim).
 MARCH_GAMMA = 1.0       # tone curve on gray: >1 darkens mids (more contour activity
                         # in midtones), <1 lightens them.

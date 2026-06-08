@@ -29,7 +29,7 @@ mkdir -p loop/holdout
 ts=$(date +%Y%m%d-%H%M%S)
 out_dir="loop/holdout"
 # render.py names artifacts iter_NNN.*; use a fixed slot and rename to timestamped.
-"$PY" loop/render.py 0 --method "${METHOD:-wave}" --levels 111 \
+"$PY" loop/render.py 0 --method "${METHOD:-march}" --levels 111 \
   --input "$INPUT" --out-dir "$out_dir" >/dev/null || { echo "FAIL: render"; exit 1; }
 out_png="${out_dir}/output_${ts}.png"
 out_stats="${out_dir}/output_${ts}.stats.json"

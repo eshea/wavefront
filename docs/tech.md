@@ -30,8 +30,8 @@ app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    ├─ engine.field.load_and_preprocess   resize to MAX_DIM=640, keep original size
    ├─ engine.field.to_luminance          BT.601 luma
    ├─ field construction (one of):
-   │     build_wave_field    method=wave     (ACTIVE — the L1-diamond field the loop tunes)
-   │     march.build_march_field method=march (EXPERIMENTAL — 4-connected marching-waves, see algorithm.md)
+   │     march.build_march_field method=march (ACTIVE — 4-connected geodesic; dark=denser, renders tones)
+   │     build_wave_field    method=wave     (parked — additive L1-diamond field; d_tone≈0)
    │     build_field        method=contour  (parked baseline — simpler uniform formula)
    │     flow.trace_flow_lines method=flow   (parked experiment)
    ├─ engine.contour.extract_contours    Marching Squares at power-spaced levels
@@ -58,10 +58,11 @@ the preview canvas).
   (`field.py`) for the active wave field, plus `THRESHOLD_POWER` (`contour.py`) —
   exposed deliberately so the ralph loop can edit exactly one per iteration. See
   `algorithm.md` for what each does. (`FIELD_*` belong to the parked contour baseline.)
-- **Active method is `wave`** (`build_wave_field`, the L1-diamond field) — what
-  `render_tick.sh` renders and the loop tunes. `contour` (`build_field`) and
-  `flow` are parked; leave them unless explicitly working on them. (Note: the
-  Flask API's own `method` default is still `contour`; the loop overrides it.)
+- **Active method is `march`** (`build_march_field`, the tone-cost geodesic) — what
+  `render_tick.sh` renders and the loop tunes (`MARCH_*` knobs). `wave`
+  (`build_wave_field`), `contour` (`build_field`) and `flow` are parked; leave them
+  unless explicitly working on them. (Note: the Flask API's own `method` default is
+  still `contour`; the loop overrides it.)
 
 ## The ralph loop (`loop/`)
 

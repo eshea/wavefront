@@ -1,12 +1,17 @@
 # WAVEFRONT Algorithm Documentation
 
-This documents the **active `method=wave` path** (`engine.field.build_wave_field`),
-the L1-diamond field WAVEFRONT now uses to replicate CONTOUR-V CORE. See
+The **active path is now `method=march`** (`engine.march.build_march_field`): a
+4-connected **geodesic** where each pixel's traversal cost rises with darkness and
+edges (`cost = MARCH_BASE + MARCH_TONE·lum_mix·dark + MARCH_EDGE·edge`); the field
+is the accumulated arrival time. Dark pixels cost more, so contours bunch in dark
+regions — **tone-driven density that renders the image's tones** — while
+4-connectivity keeps the L1 **diamond** topology. This replaced the additive
+`method=wave` field (Steps 2–3 below, now a **parked baseline**), which could only
+make density seed-centric, not image-driven (its tone-fidelity `d_tone`≈0). See
 `contour-v-core-source.md` for the replication target. The shared pipeline
-(preprocess → extract → smooth → scale → export) is the same for every method;
-only field construction (Step 3) differs. `method=contour` (`build_field`, the
-simpler uniform formula) and `method=flow` (`engine.flow`) are **parked
-baselines/experiments** — summarized at the end, not the canonical path.
+(preprocess → extract → smooth → scale → export) is the same for every method; only
+field construction differs. `method=wave/contour/flow` are parked baselines —
+documented below and at the end, not the canonical path.
 
 > **History note.** Earlier versions used an *adaptive / zoned* luminance blur
 > that imposed a circular "ring" at ~20–35% radius, plus a steep
@@ -172,7 +177,7 @@ baselines/experiments** — summarized at the end, not the canonical path.
 | lum_mix | 0-2 | 1.0 | Strength of luminance warping. |
 | wt_range | 0-1 | 0.6 | Stroke width variation. |
 | seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid. |
-| method | contour/wave/flow/march | contour | API default; the **ralph loop renders `wave`**. |
+| method | contour/wave/flow/march | contour | API default; the **ralph loop renders `march`** (tone-cost geodesic). |
 | diamond | 0-1 | 0.0 | `wave` only — maps to `WAVE_DIAMOND` if sent. |
 
 ## Experimental: method=march (marching waves)

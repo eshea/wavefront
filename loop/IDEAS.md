@@ -1,47 +1,45 @@
-# WAVEFRONT wave-field knob menu (pick ONE per tick)
+# WAVEFRONT march-field knob menu (pick ONE per tick)
 
-Canonical render is `method=wave` (`engine/field.py` `build_wave_field` — an
-L1-Manhattan **diamond** field warped by a luminance **relief**), levels 111,
-lum_mix 0.8, 780px raster. Target = the CONTOUR-V / **output-4** nested-diamond
-aesthetic on `examples/woman/woman-source.jpeg` (target: the dense
-`woman-sample-output-2.jpeg`). Score = deterministic `d_score`
-(0–100, `loop/dscore.py`): source-fidelity + style + a **diamond factor** that
-rewards the ±45° organic diamonds (`d_diag`≈0.53) and penalizes stiff/axis-aligned
-lines, AND a **tone-fidelity** term (`d_tone`: does the output's local ink density
-reproduce the SOURCE's tones?). The engine baseline is ~**47** (its diamonds are
-too seed-centric and DON'T render the image's tones — `d_tone` is ~0/negative);
-the artist outputs are ~95-100. Raising `d_tone` is the main lever now.
+Canonical render is `method=march` (`engine/march.py` `build_march_field` — a
+4-connected **geodesic** where dark/edge pixels cost more, so contours BUNCH where
+the image is dark: tone-driven density that RENDERS the image's tones, while
+4-connectivity keeps L1 **diamonds**), levels 111, lum_mix 0.8, 780px raster.
+Target = the dense CONTOUR-V portrait on `examples/woman/woman-source.jpeg`
+(→ `woman-sample-output-2.jpeg`). Score = deterministic `d_score` (0–100,
+`loop/dscore.py`): **tone-fidelity** (`d_tone`: does the output's local ink density
+reproduce the SOURCE's tones?) is the dominant term, plus a **diamond factor**
+(`d_diag`≈0.50 peak) and style. With the tuned march defaults the canonical already
+renders tone well (`d_tone`≈0.74, d_score ~100). Keep `d_tone` high and `d_diag`
+in ~0.45–0.60 while pushing the look closer to the artist.
 
 **How to use this each tick:** read the latest metrics (`d_score`, `d_fidelity`,
-`d_style`, `d_diag`, `d_ink`), find the ONE matching symptom below, make that one
+`d_tone`, `d_diag`, `d_ink`), find the ONE matching symptom below, make that one
 bounded move. Don't nudge the same knob twice in a row — if the last 2 ticks
 touched a knob and the score didn't move, pick a different symptom.
 
-## The menu — symptom → knob move (current → try), all in engine/field.py
+## The menu — symptom → knob move (current → try), all in engine/march.py
 
 | If the symptom is… | Change | Current → try |
 |---|---|---|
-| **Output doesn't render the image's TONES** (`d_tone`≈0/negative — density follows the seed diamonds, not where the image is dark; THE main gap) | `WAVE_RELIEF` up (more image-driven warp/density) and/or `TONE_CONTRAST` up | relief 2.8→3.6 / contrast 1.0→1.5 |
-| Diamonds too STIFF/geometric (`d_diag`>0.6, moiré-ish) | `WAVE_RELIEF` up | 2.8 → 3.4 |
-| Diamonds OVER-warped / broken up (`d_diag`<0.45) | `WAVE_RELIEF` down | 2.8 → 2.3 |
-| Dark regions over-dense / muddy shadows (`d_ink` high) | `TONE_GAMMA` down (lifts shadows) | 1.0 → 0.6 |
-| Subject washed out / not recognizable (`d_fidelity` low) | `TONE_CONTRAST` up, or `TONE_INVERT` 1 (portraits) | 1.0 → 1.4 / 0→1 |
-| Background too busy / noisy texture | `WAVE_FAR` down, or `WAVE_SIGMA_BG` up | 0.35→0.2 / 30→40 |
-| Face detail lost under blur | `WAVE_SIGMA_FACE` down | 8 → 5 |
-| Relief fades too early/late (ring boundary visible) | `WAVE_OUTER` up / `WAVE_INNER` down | — |
+| Output doesn't render the image's TONES (`d_tone` low) | `MARCH_TONE` up (darks bunch denser) | 4.0 → 5.0 |
+| Diamonds too STIFF/geometric (`d_diag`>0.62) | `MARCH_BASE` down (image warps more) | 0.3 → 0.2 |
+| Diamonds OVER-warped / no diamond read (`d_diag`<0.45) | `MARCH_BASE` up | 0.3 → 0.5 |
+| Dark regions go SOLID black / muddy (`d_ink`>0.7) | `MARCH_TONE` down, or `MARCH_CONTRAST` up | 4.0→3.0 / 1.4→1.8 |
+| Feature boundaries (eyes/nose/jaw) not defined | `MARCH_EDGE` up | 4.0 → 5.0 |
+| Subject washed out / midtones flat (`d_fidelity` low) | `MARCH_CONTRAST` up or `MARCH_GAMMA` >1 | 1.4→1.8 / 1.0→1.3 |
+| Background busy / noisy fine lines (`d_peakedness` low) | `MARCH_BLUR` up, or `MARCH_BASE` up | 2.0→3.5 / 0.3→0.5 |
 | Output too dense / too sparse overall | `levels` (render param) down / up | 111 → 90 / 130 |
-| Lines clump near seed vs spread evenly | `THRESHOLD_POWER` toward 1.0 (linear) | 1.3 → 1.0 |
 
 Keep moves small (one step in the suggested direction). If a move helped, the
 guard keeps it; next tick address the next gap.
 
 ## Notes / breadth (lower priority)
-- `TONE_GAMMA / TONE_CONTRAST / TONE_INVERT` are the CONTOUR-V STUDIO tonal
-  controls — they shape WHICH tones get contour density (identity at defaults).
-  Gamma<1 is the proven shadow-cleanup lever (measured a face 85→98 at 0.6).
-- A bounded formula tweak inside `build_wave_field` is allowed (e.g. how the
-  relief fades, the blend of light/heavy blur) — but as ONE small copy-verbatim
-  SEARCH/REPLACE edit.
-- The parked methods (flow/contour/march) and their FLOW_*/FIELD_*/MARCH_*
-  constants do NOT affect the wave render — don't edit them.
+- `MARCH_TONE` is THE tone-fidelity lever (darkness→cost→denser lines). `MARCH_BASE`
+  trades diamond-stiffness vs image-warp. They interact — keep moves to one per tick.
+- `MARCH_CONTRAST / MARCH_GAMMA` are the CONTOUR-V STUDIO tonal controls baked into
+  march's `_preprocess_gray` (percentile-normalize → contrast → gamma).
+- A bounded formula tweak inside `build_march_field` / `_preprocess_gray` is allowed
+  (e.g. how cost combines tone+edge) — but as ONE small copy-verbatim SEARCH/REPLACE.
+- The parked methods (wave/flow/contour) and their WAVE_*/FLOW_*/FIELD_* constants do
+  NOT affect the march render — don't edit them.
 - Mark tried ideas with their result (✅ better / ➖ same / ❌ worse + score).

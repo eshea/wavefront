@@ -34,7 +34,7 @@ LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://neuromancer:8000").rstrip("/"
 MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
 REPO = Path(__file__).resolve().parent.parent
 REFERENCE = REPO / "examples" / "woman" / "woman-sample-output-2.jpeg"   # matched target for the woman-source input
-EDITABLE = ["engine/field.py"]   # the tuning surface shown (the active method=wave)
+EDITABLE = ["engine/march.py"]   # the tuning surface shown (the active method=march)
 MAX_ATTEMPTS = 3
 
 
@@ -67,27 +67,27 @@ def recent_metrics(n=6):
 
 
 ACTIVE_NOTE = """# ACTIVE SURFACE — what actually affects the scored render
-The canonical render uses **method=wave** (engine/field.py build_wave_field — an
-L1-Manhattan diamond field warped by luminance relief: the CONTOUR-V / output-4
-nested-DIAMOND look the deterministic scorer targets). ONLY these module constants
-in engine/field.py change the output:
-  - WAVE_RELIEF     warp strength: how much the image bends the diamonds. Too low
-                    => stiff geometric diamonds (moiré, low diamond score); too high
-                    => over-warped (diamonds break up, diag drops below ~0.5). The
-                    scorer's diamond term peaks at diag≈0.53 — tune toward it.
-  - WAVE_DIAMOND    0..1 crisp-diamond bias: 0 = full ripple, 1 = ignore the image.
-  - WAVE_SIGMA_FACE / WAVE_SIGMA_BG  luminance blur near / far from the seed.
-  - WAVE_FAR        far-field ripple multiplier (background warp).
-  - WAVE_INNER / WAVE_OUTER  relief-fade radii (seed -> background).
-  - TONE_GAMMA      tonal pre-shaping: <1 LIFTS shadows (opens up over-dense dark
-                    regions — measured woman 85->98 at 0.6); >1 darkens mids.
-  - TONE_CONTRAST   tonal contrast about mid-grey (>1 = sharper light/dark).
-  - TONE_INVERT     >=0.5 = dark-first (flip tonal response; strong for portraits).
-  - the render passes levels=111, lum_mix=0.8 (111 = CONTOUR-V CORE's CONTOURS
-    density; the warped relief breaks up the grid so dense lines don't moiré, and
-    the 780px raster resolves them).
-IGNORE the FLOW_*/FIELD_* constants and build_field/trace_flow_lines — those are
-PARKED methods (flow/contour), NOT rendered now. Edit ONE WAVE_* constant per tick."""
+The canonical render uses **method=march** (engine/march.py build_march_field — a
+4-connected GEODESIC where dark/edge pixels cost more, so contours BUNCH where the
+image is dark: tone-driven density that actually RENDERS the image's tones, while
+4-connectivity keeps L1 diamonds). This is the key win — the scorer's `d_tone`
+(does the output render the source's tones?) is the dominant signal, and march
+drives it positive. ONLY these module constants in engine/march.py change the output:
+  - MARCH_TONE      darkness -> extra cost (THE tone-fidelity lever). Higher =>
+                    darks bunch lines harder => denser shadows => higher d_tone.
+  - MARCH_EDGE      edge magnitude -> extra cost. Higher => lines pile up / deflect
+                    at feature boundaries (eyes/nose/jaw). Also lowers d_diag (more warp).
+  - MARCH_BASE      base per-step cost = diamond dominance. LOW (~0.3) => image warps
+                    the diamonds organically (d_diag~0.50); HIGH => stiff diamonds
+                    (d_diag>0.65, the diamond factor penalises it).
+  - MARCH_CONTRAST / MARCH_GAMMA  tonal pre-shaping of the gray (contrast about mid,
+                    then gamma) before the cost — shapes which tones drive density.
+  - MARCH_BLUR      denoise sigma (tames busy source texture).
+  - the render passes levels=111, lum_mix=0.8 (111 = CONTOUR-V CORE's CONTOURS density;
+    lum_mix scales MARCH_TONE). Watch d_ink: if shadows go solid black (d_ink>0.85)
+    the gate zeroes the score — ease MARCH_TONE or raise MARCH_CONTRAST.
+IGNORE the WAVE_*/FLOW_*/FIELD_* constants and build_wave_field/trace_flow_lines —
+those are PARKED methods, NOT rendered now. Edit ONE MARCH_* constant per tick."""
 
 
 def build_user_text():
