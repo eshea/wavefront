@@ -68,13 +68,15 @@ CALIB = {
     "coh_mu": 0.12, "coh_sigma": 0.20,
     "ink_lo": 0.05, "ink_hi": 0.50, "ink_sigma": 0.06,  # wide plateau (density
     #                          is fidelity's job; ink only rejects extremes)
-    # DIAMOND signature — the defining VEX-LINE / CONTOUR-V aesthetic (the
-    # output-4 look the user is targeting). L1-diamond contours run at ±45°, so
-    # edge orientation concentrates on the diagonals. Measured `diag_frac` (mag-
-    # weighted fraction of gradients within ±15° of 45°/135°): all artist outputs
-    # 0.50-0.57; engine flow (axis-aligned waves) 0.28; moiré (too regular) 0.86.
-    # Applied as a multiplicative factor so it actively prefers diamonds over flow.
-    "diam_mu": 0.53, "diam_sigma": 0.10,
+    # DIAMOND / ORGANIC-CONTOUR signature — the VEX-LINE / CONTOUR-V aesthetic.
+    # L1-diamond contours run at ±45°, so edge orientation concentrates on the
+    # diagonals. Measured `diag_frac` (mag-weighted fraction of gradients within
+    # ±15° of 45°/135°) across the FULL artist range: samurai (heavily-warped,
+    # flowing) 0.39 → woman diamonds 0.50 → space 0.57 → good engine wave 0.60.
+    # The BAD axis-aligned engine flow is 0.25; the stiff moiré is 0.86. So this is
+    # a PLATEAU (full credit across the genuine range) with falloff only at the
+    # extremes, applied as a multiplicative factor.
+    "diam_lo": 0.42, "diam_hi": 0.62, "diam_sigma": 0.08,
     "diam_floor": 0.45,    # factor = diam_floor + (1-diam_floor)*diamond_score
     # fidelity rescale: a genuinely-matched pair correlates ~0.24-0.30, not ~1.
     # fid_score = clip(fidelity_raw / FID_FULL, 0, 1). Anchored on the space pair.
@@ -94,6 +96,16 @@ CALIB = {
 
 def gauss(x: float, mu: float, sigma: float) -> float:
     return float(np.exp(-0.5 * ((x - mu) / sigma) ** 2))
+
+
+def plateau(x: float, lo: float, hi: float, sigma: float) -> float:
+    """1.0 inside [lo, hi]; gaussian falloff (width sigma) outside. A tolerant
+    band score — full credit across a range, penalty only at the extremes."""
+    if x < lo:
+        return gauss(x, lo, sigma)
+    if x > hi:
+        return gauss(x, hi, sigma)
+    return 1.0
 
 
 def load_gray_work(path: Path, work: int) -> np.ndarray:
@@ -213,7 +225,8 @@ def style(out_work512: np.ndarray) -> dict:
     coh_score = gauss(coh, CALIB["coh_mu"], CALIB["coh_sigma"])
     raw = (CALIB["w_freq"] * freq_score + CALIB["w_ink"] * ink_score
            + CALIB["w_coh"] * coh_score)
-    diamond_score = gauss(diag_frac, CALIB["diam_mu"], CALIB["diam_sigma"])
+    diamond_score = plateau(diag_frac, CALIB["diam_lo"], CALIB["diam_hi"],
+                            CALIB["diam_sigma"])
     return {"freq_peak": peak_i, "peakedness": peakedness, "ink": ink,
             "std": std, "coh": coh, "edge_frac": edge_frac, "diag_frac": diag_frac,
             "freq_score": freq_score, "ink_score": ink_score,

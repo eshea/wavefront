@@ -13,13 +13,16 @@ set -u
 cd "$(dirname "$0")/../.."
 
 GOOD_MIN=88
+HARD_MIN=65   # complex/busy source (samurai) — fidelity-limited but must read as good
 BAD_MAX=5
 
 SPACE_SRC=examples/space/space-source.jpg
 SPACE_OUT=examples/space/space-output-1.jpeg
 WOMAN_SRC=examples/woman/woman-source.jpeg
+SAMURAI_SRC=examples/samurai/samurai-source.jpg
+SAMURAI_OUT=examples/samurai/samurai-output-1.jpeg
 
-for f in "$SPACE_SRC" "$SPACE_OUT" "$WOMAN_SRC"; do
+for f in "$SPACE_SRC" "$SPACE_OUT" "$WOMAN_SRC" "$SAMURAI_SRC" "$SAMURAI_OUT"; do
   [ -f "$f" ] || { echo "SKIP: missing reference $f"; exit 77; }
 done
 
@@ -65,13 +68,23 @@ check_low() {  # check_low <label> <score>
     note "$1" "d_score=$2  FAIL (want <=$BAD_MAX)"; fail=$((fail+1))
   fi
 }
+check_atleast() {  # check_atleast <label> <score> <min>
+  if python3 -c "import sys; sys.exit(0 if $2 >= $3 else 1)"; then
+    note "$1" "d_score=$2  OK (>=$3)"; ok=$((ok+1))
+  else
+    note "$1" "d_score=$2  FAIL (want >=$3)"; fail=$((fail+1))
+  fi
+}
 
-echo "GOOD outputs (must score high):"
-check_high "space (matched, full)" "$(score "$SPACE_OUT" "$SPACE_SRC")"
+echo "GOOD outputs — full source-fidelity mode (3 matched pairs):"
+check_high "space" "$(score "$SPACE_OUT" "$SPACE_SRC")"
 for n in 1 2 4; do  # output-3 is a two-face composite — excluded from calibration
   out="examples/woman/woman-sample-output-$n.jpeg"
-  [ -f "$out" ] && check_high "woman-$n (style-only)" "$(score "$out" "$WOMAN_SRC" --style-only)"
+  [ -f "$out" ] && check_high "woman-$n" "$(score "$out" "$WOMAN_SRC")"
 done
+# samurai: a genuine output but a very busy source (calligraphy+mask) → lower
+# fidelity ceiling. Must still read as clearly good, not great.
+check_atleast "samurai (busy source)" "$(score "$SAMURAI_OUT" "$SAMURAI_SRC")" "$HARD_MIN"
 
 echo "DEGENERATE images (must score ~0):"
 check_low "blank" "$(score /tmp/_dcalib_blank.png "$SPACE_SRC")"
