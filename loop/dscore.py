@@ -68,15 +68,14 @@ CALIB = {
     "coh_mu": 0.12, "coh_sigma": 0.20,
     "ink_lo": 0.05, "ink_hi": 0.50, "ink_sigma": 0.06,  # wide plateau (density
     #                          is fidelity's job; ink only rejects extremes)
-    # DIAMOND / ORGANIC-CONTOUR signature — the VEX-LINE / CONTOUR-V aesthetic.
-    # L1-diamond contours run at ±45°, so edge orientation concentrates on the
-    # diagonals. Measured `diag_frac` (mag-weighted fraction of gradients within
-    # ±15° of 45°/135°) across the FULL artist range: samurai (heavily-warped,
-    # flowing) 0.39 → woman diamonds 0.50 → space 0.57 → good engine wave 0.60.
-    # The BAD axis-aligned engine flow is 0.25; the stiff moiré is 0.86. So this is
-    # a PLATEAU (full credit across the genuine range) with falloff only at the
-    # extremes, applied as a multiplicative factor.
-    "diam_lo": 0.42, "diam_hi": 0.62, "diam_sigma": 0.08,
+    # DIAMOND signature — the VEX-LINE / CONTOUR-V aesthetic; the woman-4 diamond
+    # look is the stated target. `diag_frac` (mag-weighted fraction of gradients
+    # within ±15° of 45°/135°) PEAKS for diamonds (woman ~0.50) and falls off for
+    # heavily-warped flowing output (samurai ~0.39 — acceptable, scores moderate)
+    # and the BAD axis-aligned engine flow (~0.25, crushed) / stiff moiré (~0.86).
+    # A gaussian (not a plateau) so it PREFERS diamonds and leaves headroom for an
+    # engine render to climb toward the 0.50 ideal. Applied as a multiplicative factor.
+    "diam_mu": 0.50, "diam_sigma": 0.12,
     "diam_floor": 0.45,    # factor = diam_floor + (1-diam_floor)*diamond_score
     # fidelity rescale: a genuinely-matched pair correlates ~0.24-0.30, not ~1.
     # fid_score = clip(fidelity_raw / FID_FULL, 0, 1). Anchored on the space pair.
@@ -225,8 +224,7 @@ def style(out_work512: np.ndarray) -> dict:
     coh_score = gauss(coh, CALIB["coh_mu"], CALIB["coh_sigma"])
     raw = (CALIB["w_freq"] * freq_score + CALIB["w_ink"] * ink_score
            + CALIB["w_coh"] * coh_score)
-    diamond_score = plateau(diag_frac, CALIB["diam_lo"], CALIB["diam_hi"],
-                            CALIB["diam_sigma"])
+    diamond_score = gauss(diag_frac, CALIB["diam_mu"], CALIB["diam_sigma"])
     return {"freq_peak": peak_i, "peakedness": peakedness, "ink": ink,
             "std": std, "coh": coh, "edge_frac": edge_frac, "diag_frac": diag_frac,
             "freq_score": freq_score, "ink_score": ink_score,

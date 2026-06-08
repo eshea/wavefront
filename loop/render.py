@@ -46,7 +46,7 @@ METHODS = ("contour", "wave", "flow", "march")
 
 def render(iter_num, method="wave", levels=111, smooth=0.0, lum_mix=0.8,
            wt_range=0.0, seed_x=None, seed_y=None,
-           input_path=REPO / "examples" / "space" / "space-source.jpg",
+           input_path=REPO / "examples" / "woman" / "woman-source.jpeg",
            png_width=780, out_dir=REPO / "loop" / "output"):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ def main():
     p.add_argument("--seed-x", type=int, default=None)
     p.add_argument("--seed-y", type=int, default=None)
     p.add_argument("--input", type=Path,
-                   default=REPO / "examples" / "space" / "space-source.jpg")
+                   default=REPO / "examples" / "woman" / "woman-source.jpeg")
     p.add_argument("--png-width", type=int, default=780)
     p.add_argument("--out-dir", type=Path, default=REPO / "loop" / "output")
     a = p.parse_args()

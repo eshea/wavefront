@@ -33,8 +33,8 @@ import prompts  # noqa: E402
 LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://neuromancer:8000").rstrip("/")
 MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
 REPO = Path(__file__).resolve().parent.parent
-REFERENCE = REPO / "examples" / "contour_space_post.webp"   # matched target for the helmet input
-EDITABLE = ["engine/flow.py"]   # the tuning surface shown (the active method=flow)
+REFERENCE = REPO / "examples" / "woman" / "woman-sample-output-2.jpeg"   # matched target for the woman-source input
+EDITABLE = ["engine/field.py"]   # the tuning surface shown (the active method=wave)
 MAX_ATTEMPTS = 3
 
 

@@ -3,7 +3,8 @@
 Canonical render is `method=wave` (`engine/field.py` `build_wave_field` — an
 L1-Manhattan **diamond** field warped by a luminance **relief**), levels 111,
 lum_mix 0.8, 780px raster. Target = the CONTOUR-V / **output-4** nested-diamond
-aesthetic on `examples/space/space-source.jpg`. Score = deterministic `d_score`
+aesthetic on `examples/woman/woman-source.jpeg` (target: the dense
+`woman-sample-output-2.jpeg`). Score = deterministic `d_score`
 (0–100, `loop/dscore.py`): source-fidelity + style + a **diamond factor** that
 rewards the ±45° organic diamonds (`d_diag`≈0.53) and penalizes stiff/axis-aligned
 lines. Canonical currently ~94.

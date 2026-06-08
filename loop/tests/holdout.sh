@@ -1,23 +1,21 @@
 #!/usr/bin/env bash
 # Held-out test for the WAVEFRONT ralph loop.
 #
-# Renders current code (IN-PROCESS via loop/render.py) against an UNSEEN image —
-# examples/contour_woman.webp, which the loop does NOT optimize against (the
-# canonical training pair is the astronaut helmet, contour_space_*). Scores it and
-# appends one line to loop/holdout_metrics.jsonl.
+# Renders current code (IN-PROCESS via loop/render.py) against an UNSEEN subject —
+# the astronaut helmet (examples/space/), which the loop does NOT optimize against
+# (the canonical tuning input is now examples/woman/woman-source.jpeg). Scores it
+# and appends one line to loop/holdout_metrics.jsonl.
 #
 # Pass condition: the holdout render produces a non-trivial output
 # (edge_iou > 0.02 — basically "not blank, not crashed").
 #
-# This is a SANITY check that helmet-tuned improvements don't break the engine on
-# a different subject. It does NOT prove the output is "good" (the woman has no
-# matched target — her lineart is a different person, used here only for the
-# non-triviality metric).
+# This is a SANITY check that woman-tuned improvements still generalize to a
+# different subject (the helmet) — guards against overfitting the canonical image.
 set -u
 cd "$(dirname "$0")/../.."
 
-INPUT="examples/contour_woman.webp"
-REFERENCE="examples/contour_woman_lineart.png"
+INPUT="examples/space/space-source.jpg"
+REFERENCE="examples/space/space-output-1.jpeg"
 SKIP_EXIT_CODE=${LOOP_SKIP_EXIT_CODE:-77}
 PY=.venv/bin/python
 

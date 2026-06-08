@@ -17,13 +17,14 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/space/space-source.jpg` (astronaut helmet) | `examples/space/space-output-1.jpeg` — the artist's actual CONTOUR-V output (a CLEAN, high-res, truly MATCHED pair; flowing-wave look). The deterministic scorer compares your render to the SOURCE; this is what a ~95 looks like. | centered seed, levels 111, method=wave |
+| `examples/woman/woman-source.jpeg` (**canonical**) | `examples/woman/woman-sample-output-2.jpeg` — the artist's dense CONTOUR-V output for that input (the "really good" target; see also the low/med/high `woman-sample-output-density-example.jpeg`). The scorer compares your render to the SOURCE. | centered seed, levels 111, method=wave |
+| `examples/space/space-source.jpg` (helmet) | `examples/space/space-output-1.jpeg` — flowing-wave matched pair. Now the **holdout** (generalization check). | — |
+| `examples/samurai/samurai-source.jpg` | `examples/samurai/samurai-output-1.jpeg` — flowing matched pair (busy source). | — |
 
-NOTE: the old `contour_woman_*` set is NOT a matched pair — the woman input and the
-`contour_woman_lineart`/`post*` targets are DIFFERENT subjects, so resemblance was
-unachievable. They're retained as style references / the holdout only.
+NOTE: the OLD `contour_woman_*` files (`.webp`/`lineart`/`post*`) are a DIFFERENT,
+unmatched subject — ignore them. The matched woman pair is in `examples/woman/`.
 
-The astronaut helmet is the **canonical test**, baked into `loop/render_tick.sh` +
+The woman portrait (`woman-source.jpeg`) is the **canonical test**, baked into `loop/render_tick.sh` +
 `loop/score_tick.sh`. Also study the style references in `examples/` (the blue
 VEX-LINE face, `ref_contourv_core`, Motoko, and the classical-woman lineart) with
 the Read tool — they are output-only (no matched inputs), pure visual targets.
@@ -64,7 +65,7 @@ one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
 
 - `d_score` (0–100, **primary metric**) — how well the render re-expresses its
   SOURCE as flowing contour lines. It compares the output to its **own source**
-  (the canonical helmet, recorded in the render's `stats.json`) at a coarse
+  (the canonical woman portrait, recorded in the render's `stats.json`) at a coarse
   scale. Two parts:
   - `d_fidelity` — source-fidelity: lines dense/bent where the source has edges
     and tone, clean where it's flat → the subject stays recognisable. This is
@@ -106,12 +107,12 @@ loop/metrics.jsonl` after `score_tick.sh` runs.
 ## THE GOAL: REPLICATE THE ARTIST'S EXAMPLES
 
 The north star is always to make the canonical output **pass for one of the
-artist's own output** for the canonical input — `examples/space/space-output-1.jpeg`
-(the matched output for `examples/space/space-source.jpg`): flowing wave contours
-that bend around the helmet, dense where the image is dark (the visor),
-sparse/clean in the bright sky and desert. `d_score` measures how well the render
-re-expresses the SOURCE that way; the artist's own output scores ~95 — closing the
-gap to it is the job.
+artist's own output** for the canonical input — `examples/woman/woman-source.jpeg`
+→ the dense `examples/woman/woman-sample-output-2.jpeg`: nested diamonds that warp
+around the face, dense/tone-modulated in the shadows and detail, clean diamonds in
+flat areas, the subject clearly recognizable. `d_score` measures how well the
+render re-expresses the SOURCE that way; the artist's own output scores ~100 —
+closing the gap to it is the job.
 
 ## BREADTH FIRST — DO NOT HILL-CLIMB
 
@@ -190,7 +191,7 @@ Then view your output and the reference visually:
 ```
 # In your prompt, use Read on both:
 Read loop/output/iter_NNN.png
-Read examples/space/space-output-1.jpeg
+Read examples/woman/woman-sample-output-2.jpeg
 ```
 
 Read returns images visually. Look at them and compare specifically:
@@ -216,9 +217,9 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (helmet, centered seed, levels 111, method=wave)
+**Test:** canonical (woman-source, centered seed, levels 111, method=wave)
 - output: `loop/output/iter_NNN.svg` ({stats})
-- source: `examples/space/space-source.jpg`
+- source: `examples/woman/woman-source.jpeg`
 - visual comparison: {what you saw — be specific}
 
 **Score:** d_score=NN (fid=0.NNN style=0.NNN) ink=0.NN
