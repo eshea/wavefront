@@ -27,18 +27,29 @@ build_field / build_wave_field and feeds the identical isoline -> smooth -> SVG
 pipeline.
 """
 
+import os
+import json
+from pathlib import Path
+
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from skimage.graph import MCP
 
 
-# --- Tunable knobs for the marching-waves field (the ralph loop edits these the
-# same way it edits the WAVE_* constants). ---
-MARCH_BASE = 0.3        # base per-step cost = diamond dominance. High => crisp
+# --- Tunable knobs for the marching-waves field. ---
+# These module globals are the LIVE tuning surface: app.py overrides them per
+# request (setattr in _apply_knobs), the ralph loop / optimizer tune them, and
+# build_march_field reads them as globals. The values below are the in-code
+# defaults; if `engine/march_params.json` exists it is loaded at import (see
+# load_params() at the bottom) and OVERRIDES them — that JSON is the externalized,
+# version-controlled tuned config the optimizer writes (loop/optimize.py) and the
+# loop edits. PARAM_NAMES is the 6-vector the optimizer searches; PARAM_BOUNDS
+# the search/clamp box (NORM_LO/HI are fixed robustness knobs, not searched).
+MARCH_BASE = 0.4        # base per-step cost = diamond dominance. High => crisp
                         # diamonds barely bent by the image; low => image dominates.
                         # Tuned LOW so the image warps the diamonds organically
                         # (d_diag~0.50, matching the artist) AND tone drives density.
-MARCH_TONE = 4.6        # darkness -> extra cost (× lum_mix). Higher => darks bunch
+MARCH_TONE = 7.2        # darkness -> extra cost (× lum_mix). Higher => darks bunch
                         # lines harder (denser shadows). This is the TONE-FIDELITY
                         # lever — it's why march renders the image's tones (d_tone
                         # ~0.74 on the canonical woman vs ~0 for the additive wave).
@@ -46,11 +57,60 @@ MARCH_EDGE = 4.0        # edge magnitude -> extra cost. Higher => lines pile up 
                         # deflect at feature boundaries (eyes/nose/jaw rim).
 MARCH_GAMMA = 1.0       # tone curve on gray: >1 darkens mids (more contour activity
                         # in midtones), <1 lightens them.
-MARCH_CONTRAST = 1.4    # tonal contrast about mid-grey (sharper tonal separation).
+MARCH_CONTRAST = 2.0    # tonal contrast about mid-grey (sharper tonal separation).
 MARCH_BLUR = 2.0        # Gaussian denoise sigma on luminance (tames busy texture).
 MARCH_NORM_LO = 2.0     # low percentile for tone normalization (robust black point).
 MARCH_NORM_HI = 98.0    # high percentile (robust white point) — avoids one blown
                         # highlight/shadow dominating the whole tonal range.
+
+
+# ── externalized parameter surface (config + optimizer) ──────────────────
+# The 6 aesthetic knobs the optimizer searches, with (lo, hi) search/clamp bounds.
+PARAM_BOUNDS = {
+    "MARCH_BASE":     (0.2, 1.2),    # diamond dominance (low=image-warped, high=stiff)
+    "MARCH_TONE":     (2.0, 12.0),   # darkness→density (THE tone lever)
+    "MARCH_EDGE":     (0.0, 8.0),    # edge→density (feature definition)
+    "MARCH_GAMMA":    (0.6, 2.0),    # midtone curve
+    "MARCH_CONTRAST": (0.8, 3.0),    # tonal contrast about mid-grey
+    "MARCH_BLUR":     (0.0, 5.0),    # denoise sigma
+}
+PARAM_NAMES = tuple(PARAM_BOUNDS)
+_PARAMS_PATH = Path(__file__).with_name("march_params.json")
+
+
+def current_params():
+    """The live values of the searchable knobs as a {NAME: float} dict."""
+    g = globals()
+    return {n: float(g[n]) for n in PARAM_NAMES}
+
+
+def apply_params(params):
+    """Set the live knob globals from a {NAME: value} dict (unknown keys ignored,
+    values clamped to PARAM_BOUNDS). build_march_field reads these globals, so this
+    is how the optimizer drives a candidate in-process — same surface app.py uses."""
+    g = globals()
+    for name, val in params.items():
+        if name in PARAM_BOUNDS:
+            lo, hi = PARAM_BOUNDS[name]
+            g[name] = float(max(lo, min(hi, val)))
+
+
+def save_params(path=_PARAMS_PATH):
+    """Persist the live knob values to the JSON config (the optimizer's output)."""
+    Path(path).write_text(json.dumps(current_params(), indent=2, sort_keys=True) + "\n")
+
+
+def load_params(path=None):
+    """Apply the JSON config if present, OVERRIDING the in-code defaults. Path:
+    explicit arg → $MARCH_PARAMS env → engine/march_params.json. Returns the dict
+    applied ({} if no file). Called once at import so app/loop/render/optimizer all
+    share one tuned config; re-import per fresh process picks up edits."""
+    p = Path(path or os.environ.get("MARCH_PARAMS") or _PARAMS_PATH)
+    if p.exists():
+        data = json.loads(p.read_text())
+        apply_params(data)
+        return {n: data[n] for n in PARAM_NAMES if n in data}
+    return {}
 
 
 def _preprocess_gray(luminance):
@@ -119,3 +179,9 @@ def build_march_field(luminance, seed_x, seed_y, lum_mix=1.0):
         field[~finite] = field[finite].max()
 
     return field, float(field.min()), float(field.max())
+
+
+# Apply the externalized tuned config (engine/march_params.json) over the in-code
+# defaults at import, so the app, the loop, render.py and the optimizer all share
+# one source of truth. A fresh process per loop tick re-imports and re-reads it.
+load_params()

@@ -58,6 +58,12 @@ the preview canvas).
   (`field.py`) for the active wave field, plus `THRESHOLD_POWER` (`contour.py`) —
   exposed deliberately so the ralph loop can edit exactly one per iteration. See
   `algorithm.md` for what each does. (`FIELD_*` belong to the parked contour baseline.)
+  The 6 `MARCH_*` aesthetic knobs are additionally **externalized** to
+  `engine/march_params.json` (loaded at import, overrides the in-code defaults): the
+  version-controlled tuned config that `loop/optimize.py` (a constrained multi-input
+  black-box tuner) writes and the loop edits. `engine.march` exposes
+  `current_params/apply_params/save_params/load_params` + `PARAM_BOUNDS` as the
+  search surface; `app.py`'s per-request overrides still ride on top.
 - **Active method is `march`** (`build_march_field`, the tone-cost geodesic) — what
   `render_tick.sh` renders and the loop tunes (`MARCH_*` knobs). `wave`
   (`build_wave_field`), `contour` (`build_field`) and `flow` are parked; leave them

@@ -747,3 +747,69 @@ loop's climb signal above the d_score ceiling.
 
 **Next:** build — push `d_fine` toward 0.73 with finer/denser hatch (levels↑ or a
 finer field), watching `d_ink`<0.85 and `d_diag` in 0.45–0.60.
+
+---
+
+## Iter 040–048 · 2026-06-08 · d_fine climb (0.443 → 0.534)
+
+Steering by the new `d_fine` signal (d_score saturated at 100 throughout). Kept
+`d_diag` in band (~0.50) and `d_ink` well under the 0.85 gate.
+
+| tick | change | d_fine | d_diag | d_ink | verdict |
+|---|---|---|---|---|---|
+| 40 | CONTRAST 1.4→1.7 | 0.479 | 0.491 | 0.426 | keep ↑ |
+| 41 | GAMMA 1.0→1.25 | 0.463 | 0.493 | 0.417 | revert ↓ (mids flattened) |
+| 42 | TONE 4.6→5.2 | 0.497 | 0.485 | 0.434 | keep ↑ |
+| 43 | TONE 5.2→5.8 | 0.515 | 0.480 | 0.444 | keep ↑ |
+| 44 | TONE 5.8→6.4 | 0.527 | 0.476 | 0.451 | keep ↑ (d_diag eroding) |
+| 45 | EDGE 4.0→5.0 | 0.500 | 0.469 | 0.449 | revert ↓ (edge bunching) |
+| 46 | BASE 0.3→0.4 | 0.524 | **0.498** | 0.429 | keep (restored diamonds, flat d_fine) |
+| 47 | TONE 6.4→7.2 | 0.531 | 0.488 | 0.438 | keep ↑ |
+| 48 | CONTRAST 1.7→2.0 | **0.534** | 0.495 | 0.438 | keep ↑ (peakedness 7.38) |
+
+**Best config:** `MARCH_BASE=0.4 TONE=7.2 EDGE=4.0 GAMMA=1.0 CONTRAST=2.0` (BLUR 2.0).
+Visual (iter_048): clean diamond hatch, strong tonal modeling, deep eye/hair
+shadows, recognizable — best render to date. d_fine 0.534 vs artist 0.73 (closed
+~32% of the baseline gap). TONE was the dominant lever (diminishing returns + slow
+d_diag erosion, countered by BASE↑); CONTRAST independent + clean; GAMMA↑ and EDGE↑
+both regressed.
+
+**Next:** externalize the MARCH_* knobs + multi-input black-box optimizer (see below).
+
+---
+
+## Iter 049 · 2026-06-08 · externalized config + black-box optimizer (d_fine 0.534 → 0.686)
+
+**Built (user-requested infra):**
+- **Externalized knobs**: the 6 `MARCH_*` values now live in `engine/march_params.json`
+  (loaded at import, overrides in-code defaults). `engine.march` exposes
+  `current_params/apply_params/save_params/load_params` + `PARAM_BOUNDS`. app.py's
+  per-request overrides still ride on top; the loop now edits the JSON.
+- **Optimizer** `loop/optimize.py`: derivative-free (pipeline isn't differentiable),
+  Latin-hypercube explore + Nelder-Mead polish. Multi-input CONSTRAINED objective —
+  maximize woman `d_fine` (meaningful only on the dense woman) s.t. the SAME params
+  stay valid on samurai+space (per-source `d_score` floor + `d_ink`<0.85 + woman
+  `d_diag`∈[0.45,0.60]). `d_score` is the cross-input generalization guard, so it
+  can't overfit the metric's blind spots.
+
+**Run:** `--evals 100 --polish` (124 evals, ~2 min). Winner (feasible):
+`BASE 0.324, TONE 12.0, EDGE 0.857, GAMMA 0.6, CONTRAST 1.425, BLUR 1.85` — a region
+hand-tuning never reached (TONE at the rail, EDGE+GAMMA low). Detail: woman
+d_score=100 **d_fine=0.686 (96-grid 0.729 ≈ artist woman-2's 0.730!)** d_ink=0.478
+d_diag=0.468; samurai d_score=91; space d_score=97.
+
+**Visual (iter_049):** best render to date — face smoothly modeled, fine clean
+diagonal hatch, eyes/brows/lips defined, shadows rich but not solid. Better both
+metrically AND visually (not metric-gaming). Closed ~85% of the baseline→artist gap.
+
+**Stopped here** (didn't widen bounds past TONE=12): pushing further risks driving
+`d_fine` into the metric's necessary-not-sufficient blind spot. All gates green
+(calib 14/0, harness 4/0 incl. holdout, unit 6/6).
+
+**FOLLOW-UP (flagged, not done):** `app.py` UI clamps `march_tone` to (0,6) etc. —
+narrower than the optimizer's `PARAM_BOUNDS` (TONE→12). The web UI would clamp the
+tuned config; widen those ranges to match. (app.py has unrelated uncommitted edits,
+left untouched.)
+
+**Next:** more inputs in the optimizer set; or widen bounds + re-run with tighter
+visual review; or back to the ralph loop for a structurally finer hatch.

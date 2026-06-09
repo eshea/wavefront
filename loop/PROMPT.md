@@ -50,6 +50,14 @@ density followed the seed geometry, not the image; `d_tone`≈0). Your knobs (al
 Tune ONE per tick (see `loop/IDEAS.md` menu). `method=wave/flow/contour` and their
 WAVE_*/FLOW_*/FIELD_* constants are PARKED — they don't affect the march render.
 
+**WHERE THE KNOBS LIVE NOW:** the 6 `MARCH_*` values are externalized to
+`engine/march_params.json` (loaded at import, OVERRIDES the in-code defaults). Edit
+**that JSON** to tune one per tick — editing the `march.py` constants is shadowed by
+the JSON. For a broad sweep instead of one-knob-per-tick, run the constrained
+multi-input optimizer: `python loop/optimize.py --evals 100 --polish` (maximizes
+woman `d_fine` while keeping samurai+space valid; writes the JSON winner). Use the
+ralph loop for breadth (new fields/methods/metrics), the optimizer to exploit knobs.
+
 **HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
 `loop/holdout/contour_space_post.webp` are the held-out test set. Do
 not read from `loop/holdout/`. Do not score against it. Do not use it

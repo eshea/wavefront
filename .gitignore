@@ -57,6 +57,8 @@ loop/holdout/output_*
 # locally; the substantive outcome is baked into engine defaults + render_tick).
 loop/sweep.py
 loop/sweep_results.jsonl
+# optimizer leaderboard — regenerable per-run artifact (loop/optimize.py is tracked).
+loop/optimize_log.jsonl
 loop/WAVE_SWEEP.md
 loop/sweep_best.png
 loop/sweep_best.svg

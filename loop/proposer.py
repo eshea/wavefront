@@ -87,7 +87,9 @@ drives it positive. ONLY these module constants in engine/march.py change the ou
     lum_mix scales MARCH_TONE). Watch d_ink: if shadows go solid black (d_ink>0.85)
     the gate zeroes the score — ease MARCH_TONE or raise MARCH_CONTRAST.
 IGNORE the WAVE_*/FLOW_*/FIELD_* constants and build_wave_field/trace_flow_lines —
-those are PARKED methods, NOT rendered now. Edit ONE MARCH_* constant per tick."""
+those are PARKED methods, NOT rendered now. Tune ONE MARCH_* value per tick by
+editing engine/march_params.json (the externalized config that overrides the
+march.py defaults), or run loop/optimize.py to sweep all 6 at once."""
 
 
 def build_user_text():

@@ -39,6 +39,15 @@ Keep moves small (one step in the suggested direction). If a move helped (raised
 next gap. NOTE on `d_fine`: heavy `MARCH_BLUR` lowers it (kills fine detail);
 denser/finer hatch raises it — but watch `d_ink` (>0.85 trips the gate to 0).
 
+**Knobs live in `engine/march_params.json`** (overrides the `march.py` defaults) —
+edit that JSON to tune one per tick. **To sweep all 6 at once** (better than
+one-per-tick hand-tuning), run `python loop/optimize.py --evals 100 --polish`: a
+constrained black-box search that maximizes woman `d_fine` while keeping
+samurai+space valid, and writes the winning JSON. The hand menu above is for
+single-knob reasoning / understanding *why* a move helps; the optimizer is for
+finding the joint optimum (knobs interact — e.g. `BASE`↑ recovers the `d_diag` that
+`TONE`↑ erodes).
+
 ## Notes / breadth (lower priority)
 - `MARCH_TONE` is THE tone-fidelity lever (darkness→cost→denser lines). `MARCH_BASE`
   trades diamond-stiffness vs image-warp. They interact — keep moves to one per tick.
