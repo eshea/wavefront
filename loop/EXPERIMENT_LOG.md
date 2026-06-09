@@ -813,3 +813,76 @@ left untouched.)
 
 **Next:** more inputs in the optimizer set; or widen bounds + re-run with tighter
 visual review; or back to the ralph loop for a structurally finer hatch.
+
+---
+
+## Iter 050 · 2026-06-08 · THRESHOLD_POWER 1.3→1.0 (linear) — regression, reverted
+
+**Hypothesis:** THRESHOLD_POWER=1.3 concentrates isolines near the seed (low field = bright areas), slightly fighting the march geodesic's natural tone-following density. Linear spacing (1.0) — which the artist reference uses — should preserve the geodesic's natural distribution more faithfully and improve d_fine128.
+
+**Change:** `engine/contour.py:15` — THRESHOLD_POWER 1.3 → 1.0
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- output: `loop/output/iter_050.svg` (333 paths, 156k pts)
+- source: `examples/woman/woman-source.jpeg`
+- visual comparison: not read (reverted on metrics alone — regression visible in d_fine)
+
+**Score:** d_score=100 (fid=0.752 style=0.975) ink=0.44
+            d_fine=0.660 (96=0.707 128=0.614) d_tone=0.833 d_diag=0.451
+            · vs iter 49: d_fine Δ−0.026 (within guard tolerance of 0.04, but still regressed)
+
+**Result:** WORSE — d_fine 0.686 → 0.660. Linear spacing hurt fine-scale tone tracking, despite the reference using it. The P=1.3 concentration near the seed/face HELPS. This is counter-intuitive (we thought it was fighting tone-following) but clear from the numbers: the optimizer-tuned march params need the near-seed concentration to achieve fine mid-tone detail. Drop within guard tolerance so guard would PASS, but manually reverted since d_fine regressed the climb signal.
+
+**Key finding:** THRESHOLD_POWER=1.3 > 1.0 with the optimized march params — the near-seed concentration is beneficial, not harmful. The opposite direction (P > 1.3, e.g. 1.5) may improve further.
+
+**Next:** try THRESHOLD_POWER = 1.5–1.8 (MORE near-seed concentration). The current P=1.3 beats linear; going higher might add more face/mid-tone isoline density and improve d_fine128 (the lagging submetric, 0.614 vs 0.729 for 96-grid). Watch d_diag (was 0.451 at P=1.0, needs to stay ≥0.45).
+
+---
+
+## Iter 051 · 2026-06-08 22:01 · MAX_DIM 640→800 (native 742px grid) — new best d_fine 0.697
+
+**Hypothesis:** The woman source is 742×742. With MAX_DIM=640 it gets downscaled to 640×640 for processing, then isolines are scaled back up ×1.16 to the original. This upscaling introduces positional quantization error (lines can only be placed at 640-grid precision ≈ 1.16px in the output), which hurts d_fine128 (5px cells). Running at native 742×742 resolution eliminates this rounding, placing lines exactly where the geodesic says they should be.
+
+**Also tried this tick (reverted first):** THRESHOLD_POWER=1.3→1.5 (more near-seed concentration). Result: d_fine 0.686→0.676 — WORSE. Both directions from 1.3 are worse (1.0→0.660, 1.5→0.676). THRESHOLD_POWER=1.3 is a local optimum for this knob.
+
+**Change:** `engine/field.py:14` — MAX_DIM 640 → 800. With MAX_DIM=800, the 742×742 woman source is no longer downscaled (742 < 800); march runs at native resolution; contours scale back 1:1; SVG rasterized to 780px (only 1.05× upscale vs old 1.22×).
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- output: `loop/output/iter_051.svg` (359 paths, 203k pts; grid=742×742 vs old 640×640)
+- source: `examples/woman/woman-source.jpeg`
+- visual comparison: finer, more precisely-placed diagonal lines; face tone modeling cleaner; slightly more paths resolving mid-tone transitions better than before
+
+**Score:** d_score=100 (fid=0.768 style=0.978) ink=0.48
+            d_fine=0.697 (96=0.740 128=0.654) d_tone=0.842 d_diag=0.464
+            · vs iter 49 (prev best): d_fine Δ+0.011
+
+**Result:** BETTER — new best d_fine 0.686 → 0.697. All sub-metrics improved. d_diag=0.464 still in artist band [0.45, 0.60]. Guard PASSED, committed as checkpoint.
+
+**Key finding:** Running the geodesic at the source's native pixel resolution (no downscale → no upscale rounding) meaningfully improves fine-grid tone fidelity. The march cost map also benefits from the finer blur footprint (MARCH_BLUR=1.85 covers a smaller fraction of the 742px grid, preserving more fine tonal structure than at 640px).
+
+**Next:** Re-run the optimizer at MAX_DIM=800 — the current march_params.json was found with MAX_DIM=640, so the optimizer's optimal may shift at the new resolution (e.g., MARCH_BLUR may want to decrease since blur is now finer relative to the grid). Or try MAX_DIM=1024 to push further; or explore MARCH_BLUR reduction (currently 1.85, could go lower to reveal even finer tonal detail now that the grid is larger).
+
+---
+
+## Iter 052 · 2026-06-08 · Optimizer re-run at MAX_DIM=800 — new best d_fine 0.702
+
+**Hypothesis:** The iter-049 optimizer winner was found at MAX_DIM=640; since iter-051 raised MAX_DIM to 800 (running the woman source at native 742×742), the joint optimum of all 6 MARCH_* knobs shifts — especially MARCH_BLUR (1.85 pixels covers a smaller fraction of the 742px grid) and MARCH_BASE/MARCH_CONTRAST. Re-running the constrained multi-input optimizer at the new resolution should find a better region of parameter space.
+
+**Change:** ran `python loop/optimize.py --evals 100 --polish` (constrained: woman d_score≥95, samurai d_score≥58, space d_score≥80, d_ink<0.85, woman d_diag∈[0.45,0.60]). Winner: BASE 0.3091 (↓), TONE 12.0 (rail), EDGE 0.8818 (↑), GAMMA 0.6 (rail), CONTRAST 1.3927 (↓), BLUR 1.8826 (↑). Wrote to `engine/march_params.json`.
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- output: `loop/output/iter_052.svg` (357 paths, 202k pts; grid=742×742)
+- source: `examples/woman/woman-source.jpeg`
+- visual comparison: comparable to iter 051 best; slightly cleaner mid-tone diagonal transitions; face modeled smoothly; d_fine96 improved to 0.745
+
+**Score:** d_score=100 (fid=0.769 style=0.979) ink=0.48
+            d_fine=0.702 (96=0.745 128=0.659) d_tone=0.842 d_diag=0.466
+            · vs iter 051 (prev best): d_fine Δ+0.005
+
+**Result:** BETTER — new best d_fine 0.697 → 0.702. All constraints satisfied (samurai d_score=88, space d_score=98). Guard PASSED, committed as checkpoint.
+
+**Key finding:** The optimizer at the new native-resolution grid found a slightly different joint optimum — lower BASE (less diamond stiffness), slightly lower CONTRAST, slightly higher BLUR and EDGE. The improvement is modest (~0.005) but consistent direction (96-grid up from 0.740→0.745, 128-grid up from 0.654→0.659). We're at 0.702 vs artist target ~0.73, gap is now ~0.028.
+
+**Next:** consider trying MAX_DIM=1024 (push resolution even further; the woman source is 742px so it won't help for woman but could improve the grid quality model); or focus on a qualitatively different direction — THRESHOLD_POWER was explored (1.3 is optimal), levels 111 is fixed, so the remaining lever may be a formula change inside build_march_field (e.g. normalize cost differently, or try a different cost combination). Or run the optimizer with wider MARCH_TONE bounds (currently capped at 12) to see if TONE>12 helps at native resolution without tripping d_ink.
+
+**Next:** Re-run the optimizer at MAX_DIM=800 — the current march_params.json was found with MAX_DIM=640, so the optimizer's optimal may shift at the new resolution (e.g., MARCH_BLUR may want to decrease since blur is now finer relative to the grid). Or try MAX_DIM=1024 to push further; or explore MARCH_BLUR reduction (currently 1.85, could go lower to reveal even finer tonal detail now that the grid is larger).
