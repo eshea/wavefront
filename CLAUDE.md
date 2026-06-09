@@ -43,7 +43,7 @@ The processing pipeline in `app.py:/process` runs in this fixed order: **field c
 - `field.py` — **parked** field methods:
   - `build_wave_field` (method=`wave`): an L1 distance base + gentle luminance relief (`WAVE_*` knobs; `shape_tone`'s `TONE_GAMMA/TONE_CONTRAST/TONE_INVERT` STUDIO controls apply here and to `contour`). Architecturally additive → `d_tone`≈0, so it was superseded by march; kept as a baseline.
   - `build_field` (method=`contour`) — the simpler uniform `field = (|x-sx|+|y-sy|) + (255-lum_pre)·lum_mix`; `flow.py`'s `trace_flow_lines` (method=`flow`) is likewise parked. (Note: the old adaptive/zoned "ring" blur was a bug — do not reintroduce it.)
-  - `MAX_DIM = 640` (in `field.py`) caps the processing grid; contours are computed downscaled then scaled back to upload dimensions.
+  - `MAX_DIM = 800` (in `field.py`) caps the processing grid; contours are computed downscaled then scaled back to upload dimensions (sources ≤800px, e.g. the 742px canonical woman, run at native resolution — no upscale rounding).
 - `contour.py` — Marching Squares isoline extraction at power-spaced thresholds. `THRESHOLD_POWER` (1.0 = linear/even spacing) applies to every isoline method (march/wave/contour).
 - `smooth.py` — Chaikin corner-cutting. The `smooth` param (0–1) maps to 0–4 subdivision iterations.
 - `export.py` — SVG with adaptive stroke weight/opacity (thick/dark near seed → thin/faint at edges).

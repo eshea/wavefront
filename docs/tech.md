@@ -27,7 +27,7 @@ Browser (templates/index.html)
    ▼
 app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    │
-   ├─ engine.field.load_and_preprocess   resize to MAX_DIM=640, keep original size
+   ├─ engine.field.load_and_preprocess   resize to MAX_DIM=800, keep original size
    ├─ engine.field.to_luminance          BT.601 luma
    ├─ field construction (one of):
    │     march.build_march_field method=march (ACTIVE — 4-connected geodesic; dark=denser, renders tones)
@@ -47,7 +47,7 @@ the preview canvas).
 
 ## Key design points
 
-- **Two-grid model.** Contours are computed on a ≤640px processing grid for
+- **Two-grid model.** Contours are computed on a ≤800px processing grid for
   speed, then scaled back to the *original* upload dimensions for export, so SVG
   is full-resolution and plotter-accurate. Seed coordinates are in the
   processing grid.
