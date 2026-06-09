@@ -11,7 +11,7 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter
 
 
-MAX_DIM = 640  # Maximum dimension for processing grid
+MAX_DIM = 800  # Maximum dimension for processing grid
 
 
 def load_and_preprocess(image_file, max_dim=MAX_DIM):
