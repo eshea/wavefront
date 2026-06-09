@@ -707,3 +707,43 @@ is pinned to `$(cat loop/.iter)` (see PROMPT.md) so this can't recur.
 Also note: the judge 85↔15 swings on near-pixel-identical renders were
 largely judge NOISE — `judge.py` now takes the median of `--samples 3` to
 de-noise, and `guard_tick.sh` gates on that median.
+
+---
+
+## Iter 039 · 2026-06-08 19:00 · new d_fine climb metric + MARCH_TONE 4.0→4.6
+
+**Context:** `d_score` is SATURATED at 100 on the canonical woman — knob-tuning had
+no signal to climb (confirmed by tries this session: blur↑ and base↑ both kept
+d_score=100 while trading tone fidelity for hatch cleanliness, the documented
+"honest limitation"). Probed three global "fine/clean hatch" discriminators
+(structure-tensor coherence, spectral fineness, connected-component fragmentation)
+— ALL non-discriminating: the good-output manifold is too wide (moire/seed_blob
+out-score good women on coherence; woman-dens centroid 30 vs woman-4 103). Only a
+SOURCE-RELATIVE signal separates cleanly.
+
+**Hypothesis:** Fine-grid tonal fidelity (SSIM of output ink-density vs source
+darkness at grids 96/128, finer than d_tone's 16/32/64) gives real headroom on the
+dense canonical render while staying robust (negatives crushed), so it can be the
+loop's climb signal above the d_score ceiling.
+
+**Change:**
+- `loop/dscore.py` — added `fine_tone()` + `d_fine`/`d_fine96`/`d_fine128`,
+  REPORTED-ONLY (NOT in d_score → calib gate untouched, stays 14/0 green).
+- `loop/guard_tick.sh` — added `regression-fine` FAIL on `d_fine` drop
+  > `GUARD_FINE_DROP` (0.04) so a tick can't trade away fine-hatch while d_score holds.
+- `engine/march.py` — `MARCH_TONE` 4.0→4.6 (first real climb tick: denser shadows
+  → better fine-scale local tone).
+- Docs: PROMPT.md, IDEAS.md, CLAUDE.md updated to steer by `d_fine`.
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- d_fine corpus: ours-036 0.443 → ours-039 **0.470** (↑); artist woman-2 **0.696**
+  (the climb target); finer-hatch render (levels 150) 0.513 (confirms lever);
+  negatives moire 0.096, tone_invert −0.377 (crushed).
+- Guard verified: PASS on the 0.470 gain; FAIL (revert) on a forced regression
+  (heavy blur → d_fine 0.364 < 0.470−0.04) while d_score still 100.
+- visual: iter_039 shadows/hair slightly more modeled vs 036; not blown (d_ink 0.41).
+
+**Score:** `iter 39: d_score=100 d_fine=0.4704 (96=0.5108 128=0.43) d_tone=0.7217 d_ink=0.4144 d_diag=0.4949`
+
+**Next:** build — push `d_fine` toward 0.73 with finer/denser hatch (levels↑ or a
+finer field), watching `d_ink`<0.85 and `d_diag` in 0.45–0.60.

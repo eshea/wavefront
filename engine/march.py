@@ -38,7 +38,7 @@ MARCH_BASE = 0.3        # base per-step cost = diamond dominance. High => crisp
                         # diamonds barely bent by the image; low => image dominates.
                         # Tuned LOW so the image warps the diamonds organically
                         # (d_diag~0.50, matching the artist) AND tone drives density.
-MARCH_TONE = 4.0        # darkness -> extra cost (× lum_mix). Higher => darks bunch
+MARCH_TONE = 4.6        # darkness -> extra cost (× lum_mix). Higher => darks bunch
                         # lines harder (denser shadows). This is the TONE-FIDELITY
                         # lever — it's why march renders the image's tones (d_tone
                         # ~0.74 on the canonical woman vs ~0 for the additive wave).

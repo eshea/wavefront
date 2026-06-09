@@ -97,24 +97,41 @@ one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
   difference — a higher `d_score` is necessary, not sufficient. Some off-aesthetic
   renders (`loop/tests/fixtures/borderline/`) are metrically inside the legit artist
   band and intentionally NOT penalised; don't expect the score to catch those.
+- `d_fine` (0–1, **the CLIMB signal now that `d_score` has saturated at 100**) —
+  fine-grid tonal fidelity: SSIM of the output's local ink-density vs the SOURCE's
+  darkness at grids 96/128 (FINER than `d_tone`'s 16/32/64; see `d_fine96/128`). On
+  the dense canonical woman it rises monotonically as the hatch gets finer/cleaner
+  and keeps tracking local tone — so it gives headroom that `d_score` (pinned at
+  100) no longer does. Current baseline ≈ **0.47**; the artist's dense woman output
+  (`woman-sample-output-2`) reaches ≈ **0.73** — that gap is the climb. It is
+  REPORTED-ONLY (NOT folded into `d_score`): it is not discriminating across the
+  whole good manifold (the SPARSE good styles — space, samurai, woman-4 diamonds —
+  legitimately score low on fine-tone, so gating on it would false-reject them),
+  but the loop only ever renders the dense woman, where it is valid and robust
+  (negatives crushed: moire ≈0.10, tone_invert ≈−0.38). **`guard_tick.sh` reverts a
+  tick that drops `d_fine` by >`GUARD_FINE_DROP` (0.04) even while `d_score` holds.**
 - `ink_coverage`, `ssim`, `edge_iou`, `path_fit` — legacy pixel co-signals only;
   near-flat across good/bad, recorded but **don't chase them**.
 
 **Before deciding what to try this tick**, run:
 ```
-tail -10 loop/metrics.jsonl | jq -c '{iter, d_score, d_fidelity, d_style, d_ink}'
+tail -10 loop/metrics.jsonl | jq -c '{iter, d_score, d_fine, d_fidelity, d_style, d_ink}'
 ```
-Look at WHICH part is low. Low `d_fidelity` → the lines don't track the source
-(subject lost / density not tone-modulated) — change how the field follows the
+`d_score` is already 100 on the canonical — **steer by `d_fine`** (raise it toward
+the artist's ~0.73). Low `d_fidelity`/`d_fine` → the lines don't track the source
+(subject lost / density not tone-modulated, or the hatch is too coarse to render
+fine local tone) — make the hatch finer/denser or change how the field follows the
 image. Low `d_style` → it doesn't read as line art (check `d_freq_peak` ≈ 6–7,
-`d_peakedness`, `d_ink`). If `d_score` has been flat or dropping across the last
+`d_peakedness`, `d_ink`). If `d_fine` has been flat or dropping across the last
 3–5 ticks, your hypotheses aren't working — try something QUALITATIVELY different
 (a different idea category, or revert).
 
-Your job: raise `d_score` tick by tick toward the artist's ~95. A deterministic
-guard (`loop/guard_tick.sh`) auto-commits a passing tick and auto-reverts a
-regression (absolute floor + relative drop), but still `git checkout -- engine/`
-your own change before exiting if you can see it made things worse.
+Your job: keep `d_score` at 100 (don't regress the gate) while raising `d_fine`
+tick by tick toward the artist's ~0.73. A deterministic guard (`loop/guard_tick.sh`)
+auto-commits a passing tick and auto-reverts a regression (absolute `d_score`
+floor + relative drop, AND a `d_fine` drop > `GUARD_FINE_DROP`), but still
+`git checkout -- engine/` your own change before exiting if you can see it made
+things worse.
 
 **Include the latest score line in your log entry.** Use `tail -1
 loop/metrics.jsonl` after `score_tick.sh` runs.

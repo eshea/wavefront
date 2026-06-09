@@ -77,6 +77,24 @@ TONE_WEIGHTS = (0.25, 0.40, 0.35)
 STYLE_WORK = 512    # square grid for the FFT / style stats
 INK_THRESH = 160    # px < this = "inked" (tolerant of AA / JPEG'd line edges)
 
+# ── FINE-HATCH climb metric (d_fine) ─────────────────────────────────────
+# A SEPARATE, REPORTED-BUT-NOT-GATED signal: fine-grid tonal fidelity of the
+# output's local ink-density vs its OWN source's darkness, at grids FINER than
+# d_tone's. WHY separate from d_score: on the canonical dense woman render this
+# rises monotonically as the hatch gets finer/cleaner and correctly tracks local
+# tone (ours ~0.48 → the artist's dense woman output ~0.73), so it gives the loop
+# REAL HEADROOM once d_score has saturated at 100. But it is NOT discriminating
+# across the WHOLE good-output manifold — the SPARSE good styles (space, samurai,
+# the sparse-clean woman-4 diamonds) legitimately score low on fine-tone (sparse
+# lines correlate weakly with a fine darkness map; see the FID_FULL note), so
+# folding it into d_score would false-reject them and turn the calib gate red.
+# Instead it's a tie-breaker the guard ranks on while d_score holds: the loop
+# only ever renders the dense canonical woman, where fine-tone is valid + robust
+# (negatives are crushed: moire ~0.10, seed_blob ~-0.05, tone_invert ~-0.42).
+FINE_WORK = 768     # finer work grid so the fine block_reduce cells are meaningful
+FINE_SCALES = (96, 128)
+FINE_WEIGHTS = (0.5, 0.5)
+
 # ── calibration constants (fit by --calibrate over the good-output library) ──
 CALIB = {
     # style sub-metric Gaussians: score = exp(-0.5*((x-mu)/sigma)^2)
@@ -206,6 +224,30 @@ def tone_fidelity_ms(src_work: np.ndarray, out_work: np.ndarray) -> dict:
     return {"tone_ms": tone_ms, **per_scale}
 
 
+def fine_tone(src_path: Path, out_path: Path) -> dict:
+    """Fine-grid tonal fidelity — the d_fine climb metric (see FINE_* note).
+
+    SSIM between the output's local ink-density and the source's darkness at
+    grids FINER than d_tone's (FINE_SCALES), loaded at FINE_WORK so the fine
+    cells aren't degenerate. Reported, NOT folded into d_score. Robust + source-
+    anchored (negatives score ~0/negative), it rises as the canonical render's
+    hatch gets finer while still tracking local tone — the loop's headroom signal
+    once d_score saturates. Returns the weighted sum + per-scale diagnostics."""
+    src = load_gray_work(src_path, FINE_WORK)
+    out = load_gray_work(out_path, FINE_WORK)
+    dark_full = 255.0 - src
+    per_scale = {}
+    fine = 0.0
+    for n, w in zip(FINE_SCALES, FINE_WEIGHTS):
+        blk = src.shape[0] // n
+        dens = _norm(block_reduce((out < INK_THRESH).astype(np.float32), (blk, blk), np.mean))
+        dark = _norm(block_reduce(dark_full, (blk, blk), np.mean))
+        s = float(ssim(dens, dark, data_range=1.0, win_size=7))
+        per_scale[f"fine{n}"] = s
+        fine += w * s
+    return {"fine": fine, **per_scale}
+
+
 def fidelity(src_work: np.ndarray, out_work: np.ndarray) -> dict:
     """How faithfully the output renders the SOURCE.
 
@@ -315,10 +357,13 @@ def score(out_path: Path, src_path: Path, style_only: bool = False) -> dict:
     if style_only:
         fid = {"r": None, "tone": None, "fidelity_raw": None,
                "tone16": None, "tone32": None, "tone64": None}
+        fin = {"fine": None, "fine96": None, "fine128": None}
         combined = st["style_raw"] * gate * diam_factor
     else:
         src_w = load_gray_work(src_path, WORK)
         fid = fidelity(src_w, out_w)
+        # d_fine: reported-only fine-hatch climb signal (NOT in `combined`).
+        fin = fine_tone(src_path, out_path)
         fid_score = min(1.0, fid["fidelity_raw"] / CALIB["FID_FULL"])
         # Tone-fidelity LEADS (style Gaussians are non-discriminating — they read
         # ~0.95+ for genuine art AND for smudgy negatives — so they get less weight).
@@ -336,6 +381,9 @@ def score(out_path: Path, src_path: Path, style_only: bool = False) -> dict:
         "d_tone16": None if fid.get("tone16") is None else round(fid["tone16"], 4),
         "d_tone32": None if fid.get("tone32") is None else round(fid["tone32"], 4),
         "d_tone64": None if fid.get("tone64") is None else round(fid["tone64"], 4),
+        "d_fine": None if fin.get("fine") is None else round(fin["fine"], 4),
+        "d_fine96": None if fin.get("fine96") is None else round(fin["fine96"], 4),
+        "d_fine128": None if fin.get("fine128") is None else round(fin["fine128"], 4),
         "d_freq_peak": st["freq_peak"],
         "d_peakedness": round(st["peakedness"], 3),
         "d_ink": round(st["ink"], 4),

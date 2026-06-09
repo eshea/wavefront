@@ -19,11 +19,14 @@
 # own gate, so it trips the absolute floor here automatically.
 #
 # FAIL conditions:
-#   - below floor   : d_score < GUARD_FLOOR (absolute quality bar)
-#   - regression    : d_score < recent_best - GUARD_DROP (relative)
+#   - below floor    : d_score < GUARD_FLOOR (absolute quality bar)
+#   - regression     : d_score < recent_best - GUARD_DROP (relative)
+#   - regression-fine: d_fine  < recent_best - GUARD_FINE_DROP (the fine-hatch climb
+#                      signal; d_score pins at 100 on the canonical, so this is what
+#                      stops a tick trading away hatch quality while d_score holds)
 #
 # Usage:   ./loop/guard_tick.sh <iter_number>
-# Env:     GUARD_FLOOR(30) GUARD_DROP(8) GUARD_DISABLE GUARD_NO_COMMIT
+# Env:     GUARD_FLOOR(30) GUARD_DROP(8) GUARD_FINE_DROP(0.04) GUARD_DISABLE GUARD_NO_COMMIT
 #          GUARD_NO_COMMIT = no git side effects at all: skips the PASS commit
 #          AND the FAIL revert (use it for manual/dry-run testing).
 set -u
@@ -79,7 +82,24 @@ if prior:
     if d < best - DROP:
         print(f"FAIL regression d_score={d}<best{best}-{DROP:g}"); sys.exit(0)
 
-print(f"PASS d_score={d}")
+# d_fine tie-breaker: d_score pins at 100 on the canonical woman render, so the
+# fine-hatch metric (dscore.py d_fine — fine-grid tone fidelity, reported-not-gated)
+# is the real climb signal once d_score saturates. Don't let a tick trade fine-hatch
+# quality away while d_score holds: FAIL if d_fine regressed vs recent best.
+FINE_DROP = float(os.environ.get("GUARD_FINE_DROP", 0.04))
+fcur = cur.get("d_fine")
+if isinstance(fcur, (int, float)):
+    fprior = [r.get("d_fine") for r in rows
+              if r.get("iter") != iter_num
+              and isinstance(r.get("d_fine"), (int, float))]
+    fprior = fprior[-10:]
+    if fprior:
+        fbest = max(fprior)
+        if fcur < fbest - FINE_DROP:
+            print(f"FAIL regression-fine d_fine={fcur:.3f}<best{fbest:.3f}-{FINE_DROP:g}")
+            sys.exit(0)
+
+print(f"PASS d_score={d}" + (f" d_fine={fcur:.3f}" if isinstance(fcur, (int, float)) else ""))
 PY
 )
 
