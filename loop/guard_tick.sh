@@ -24,11 +24,16 @@
 #   - regression-fine: d_fine  < recent_best - GUARD_FINE_DROP (the fine-hatch climb
 #                      signal; d_score pins at 100 on the canonical, so this is what
 #                      stops a tick trading away hatch quality while d_score holds)
+#   - tests-failed   : a metric-PASS that touched engine/ but broke the app's unit
+#                      tests (tests.test_app) — the metrics don't exercise them, so
+#                      the suite runs here before any checkpoint (skip: GUARD_NO_TEST)
 #
 # Usage:   ./loop/guard_tick.sh <iter_number>
 # Env:     GUARD_FLOOR(30) GUARD_DROP(8) GUARD_FINE_DROP(0.04) GUARD_DISABLE GUARD_NO_COMMIT
+#          GUARD_NO_TEST GUARD_TEST_CMD(python -m unittest tests.test_app)
 #          GUARD_NO_COMMIT = no git side effects at all: skips the PASS commit
 #          AND the FAIL revert (use it for manual/dry-run testing).
+#          GUARD_NO_TEST   = skip the unit-test gate (e.g. deps unavailable).
 set -u
 cd "$(dirname "$0")/.."
 
@@ -107,6 +112,29 @@ decision=${verdict%% *}
 reason=${verdict#* }
 ts=$(date '+%Y-%m-%d %H:%M:%S')
 
+# ── test gate ───────────────────────────────────────────────────────────────
+# A metric PASS isn't sufficient: the loop only edits engine/, and the canonical
+# render + dscore don't exercise the app's unit tests — so a tick can satisfy
+# d_score/d_fine yet break tests.test_app (this really happened with MAX_DIM
+# 640→800, which the loop auto-committed). Before checkpointing a PASS that
+# touched engine/, run the fast suite against the working tree; if it fails, flip
+# to FAIL so the change is reverted, not committed. Skip with GUARD_NO_TEST;
+# override the command with GUARD_TEST_CMD.
+if [ "$decision" = "PASS" ] && [ -z "${GUARD_NO_TEST:-}" ] \
+   && ! git diff --quiet -- engine/ 2>/dev/null; then
+  mkdir -p loop/log
+  if [ -x .venv/bin/python ]; then tpy=".venv/bin/python"; else tpy="python3"; fi
+  test_cmd="${GUARD_TEST_CMD:-$tpy -m unittest tests.test_app}"
+  if $test_cmd >loop/log/guard_test.log 2>&1; then
+    echo "[guard] tests PASS — engine change is safe to checkpoint"
+  else
+    fail_line=$(grep -m1 -E '^(FAIL|ERROR):' loop/log/guard_test.log)
+    decision="FAIL"
+    reason="tests-failed ${fail_line:-see loop/log/guard_test.log}"
+    echo "[guard] tests FAIL — $reason" >&2
+  fi
+fi
+
 # Remediation note → loop/.guard_feedback. status.py folds this into STATUS.md so the
 # NEXT tick's agent sees WHY the prior change was kept/reverted (the harness-engineering
 # "inject remediation into the agent's context"). Map the verdict to a concrete nudge.
@@ -114,6 +142,7 @@ case "$reason" in
   regression-fine*) suggest="That change traded away fine-hatch tone fidelity (d_fine). It was reverted — try a DIFFERENT idea category (see IDEAS.md), not the same knob." ;;
   regression*)      suggest="That change regressed the primary d_score. Reverted — try a qualitatively different approach, or check d_diag/d_ink for what broke." ;;
   below-floor*)     suggest="Output was degenerate (below floor). Reverted — check the dscore gate inputs (d_ink in 0.05–0.85, d_peakedness, d_diag in band)." ;;
+  tests-failed*)    suggest="The change passed the metrics but BROKE the app's unit tests — reverted. Run \`python -m unittest tests.test_app\` after engine edits; see loop/log/guard_test.log for the failure." ;;
   no-*|no\ *)       suggest="No score for this tick (render/score skipped). Re-run render_tick.sh + score_tick.sh before tuning." ;;
   *)                suggest="Kept as a checkpoint. Address the next-lowest metric in STATUS.md (steer by d_fine while d_score holds at 100)." ;;
 esac
