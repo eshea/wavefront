@@ -58,15 +58,12 @@ METHOD_KNOBS = {
         *_TONE,
         _THRESH,
     ],
-    'march': [
-        ('march_base',     em, 'MARCH_BASE',     0.2, 10.0),
-        ('march_tone',     em, 'MARCH_TONE',     0.0, 6.0),
-        ('march_edge',     em, 'MARCH_EDGE',     0.0, 6.0),
-        ('march_gamma',    em, 'MARCH_GAMMA',    0.4, 2.5),
-        ('march_contrast', em, 'MARCH_CONTRAST', 0.5, 2.5),
-        ('march_blur',     em, 'MARCH_BLUR',     0.0, 6.0),
-        _THRESH,
-    ],
+    # march knobs + ranges come straight from engine.march.PARAM_BOUNDS — single
+    # source of truth, so the UI sliders match the optimizer's search/clamp box and
+    # the tuned march_params.json defaults (e.g. MARCH_TONE=12) render without being
+    # silently clamped by a stale UI range.
+    'march': [(name.lower(), em, name, lo, hi)
+              for name, (lo, hi) in em.PARAM_BOUNDS.items()] + [_THRESH],
     'flow': [
         ('flow_angle',        efl, 'FLOW_ANGLE',        0.0, 90.0),
         ('flow_carrier',      efl, 'FLOW_CARRIER',      0.0, 1.0),
@@ -211,15 +208,15 @@ def process():
     """
     try:
         image_file = _required_image_file()
-        levels = _parse_int_param('levels', 63, 10, 150)
-        smooth = _parse_float_param('smooth', 0.7, 0.0, 1.0)
-        lum_mix = _parse_float_param('lum_mix', 1.0, 0.0, 2.0)
-        wt_range = _parse_float_param('wt_range', 0.6, 0.0, 1.0)
+        levels = _parse_int_param('levels', 111, 10, 150)
+        smooth = _parse_float_param('smooth', 0.0, 0.0, 1.0)
+        lum_mix = _parse_float_param('lum_mix', 0.8, 0.0, 2.0)
+        wt_range = _parse_float_param('wt_range', 0.0, 0.0, 1.0)
         seed_x = _parse_optional_int_param('seed_x')
         seed_y = _parse_optional_int_param('seed_y')
-        method = request.form.get('method', 'contour').strip().lower()
+        method = request.form.get('method', 'march').strip().lower()
         if method not in METHODS:
-            method = 'contour'
+            method = 'march'
 
         try:
             rgb_array, original_size, processed_size = load_and_preprocess(image_file)

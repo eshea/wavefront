@@ -172,12 +172,12 @@ documented below and at the end, not the canonical path.
 
 | Parameter | Range | Default | Notes |
 |-----------|-------|---------|-------|
-| levels | 10-150 | 63 | Number of power-spaced threshold levels. |
-| smooth | 0-1 | 0.70 | Mapped to 0-4 Chaikin iterations. |
-| lum_mix | 0-2 | 1.0 | Strength of luminance warping. |
-| wt_range | 0-1 | 0.6 | Stroke width variation. |
+| levels | 10-150 | 111 | Number of power-spaced threshold levels. |
+| smooth | 0-1 | 0.00 | Mapped to 0-4 Chaikin iterations. |
+| lum_mix | 0-2 | 0.8 | Strength of luminance warping. |
+| wt_range | 0-1 | 0.0 | Stroke width variation. |
 | seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid. |
-| method | contour/wave/flow/march | contour | API default; the **ralph loop renders `march`** (tone-cost geodesic). |
+| method | contour/wave/flow/march | march | API + UI default — the canonical "woman output" (tone-cost geodesic), matching `render_tick.sh`. |
 | diamond | 0-1 | 0.0 | `wave` only — maps to `WAVE_DIAMOND` if sent. |
 
 ## Experimental: method=march (marching waves)
@@ -202,7 +202,11 @@ isolines bunch → denser lines; "the visor goes black"):
 the image (face fades); low (≈1) ⇒ image strongly bends/bunches the diamonds
 (strong feature definition, denser). Other knobs: `MARCH_TONE` (dark density),
 `MARCH_EDGE` (edge deflection/bunching), `MARCH_GAMMA`/`MARCH_CONTRAST`/`MARCH_BLUR`
-(tone preprocessing), `MARCH_NORM_LO/HI` (percentile normalize).
+(tone preprocessing), `MARCH_NORM_LO/HI` (percentile normalize). The 6 aesthetic
+knobs are **externalized** to `engine/march_params.json` (loaded at import,
+overrides the in-code defaults) — the tuned config the optimizer (`loop/optimize.py`)
+writes and the loop edits; `engine.march.PARAM_BOUNDS` is the search/clamp box, also
+the source of the web UI's STUDIO slider ranges.
 
 **Why 4-connectivity (not a true eikonal):** an isotropic fast-marching eikonal
 (scikit-fmm) was tried earlier and abandoned — its round fronts globally rerouted
