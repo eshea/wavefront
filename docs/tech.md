@@ -82,6 +82,20 @@ appended to `loop/metrics.jsonl`), gates on the result (`guard_tick.sh`), and
 logs to `EXPERIMENT_LOG.md`. A held-out set (`loop/holdout/`) guards overfitting
 — **never read, score, or train against it.**
 
+**The agent's legible environment.** Following the "make the artifact legible to the
+agent" principle, each tick regenerates a small set of git-ignored situational
+artifacts the inner agent reads first (instead of juggling raw files or stale prose):
+`STATUS.md` (`status.py`) — the **live** knob values + `PARAM_BOUNDS`, the recent
+metrics trend, the best `d_fine` so far, and the prior tick's guard verdict;
+`output/_latest_compare.png` (`montage.py`) — a single montage of
+**source | current | best-so-far | artist target** with metrics annotated, so the
+agent *sees* what changed; `EXPERIMENT_DIGEST.md` (`distill.py`) — `EXPERIMENT_LOG.md`
+distilled to helped / ruled-out / open; and `.guard_feedback` — the guard's
+"why kept/reverted + what to try" note, folded into `STATUS.md`. Config can't drift
+because the tuning docs hold **no** `MARCH_*` numbers (they point at `STATUS.md`); a
+harness test (`loop/tests/doc_freshness.sh`) fails the build if one creeps back in.
+`render_tick.sh` also garbage-collects old per-tick dumps (`OUTPUT_KEEP`, default 20).
+
 Scoring is **deterministic** (`dscore.py`, `d_score` 0–100): it compares the
 output to its **own source** — source-fidelity (subject recognizable / density
 tone-modulated) + style (line-spacing FFT, ink band, orientation). The dominant

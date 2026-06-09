@@ -46,3 +46,18 @@ fi
   --lum-mix 0.8 \
   --wt-range 0.0 \
   --png-width "$png_width"
+
+# Assemble the legible comparison montage (source | current | best | target) the
+# agent Reads at a stable path. Best-effort: a montage failure must NOT fail a tick.
+"$python_bin" loop/montage.py "$iter_num" || echo "[render_tick] montage skipped" >&2
+
+# Garbage-collect old per-tick dumps so loop/output stays small/legible. Keep the
+# most recent KEEP iter_NNN renders; never touch the force-tracked input fixture
+# iter_014.png (it's a test dependency — see .gitignore). The _best/_latest_compare
+# images and current-woman.*/march_sample_* fixtures don't match the iter_NNN glob.
+keep="${OUTPUT_KEEP:-20}"
+ls -1t loop/output/iter_[0-9]*.png 2>/dev/null | grep -v '/iter_014\.png$' \
+  | tail -n +"$((keep + 1))" | while read -r old; do
+  base="${old%.png}"
+  rm -f "$base.png" "$base.svg" "$base.stats.json"
+done

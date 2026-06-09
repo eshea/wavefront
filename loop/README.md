@@ -86,18 +86,38 @@ Opus is ~5× more.
 
 `PROMPT.md` (read by each invocation) tells Claude to:
 
-1. **Review** the last entries in `EXPERIMENT_LOG.md`
-2. **Pick one** small change to try
-3. **Build** it (Edit one or two files)
-4. **Test** by curl-ing `/process` with the canonical settings from
-   `examples/contour_woman_settings.webp` (seed 227,225, levels 111,
-   smooth 0.00) — input `examples/contour_woman.webp`, output written
-   to `loop/output/iter_NNN.svg`. Rasterized via `rsvg-convert` for
-   visual comparison.
-5. **Document** in `EXPERIMENT_LOG.md` — hypothesis, change, result,
-   next step. Revert via `git checkout` if regression.
+1. **Orient** — read `STATUS.md` (the generated start-of-tick view: live knob
+   values + bounds, recent metrics trend, best `d_fine`, and why the last tick was
+   kept/reverted) and `Read loop/output/_latest_compare.png` (the montage).
+2. **Pick one** small change to try (from `IDEAS.md`, a different category than the
+   last 2 ticks).
+3. **Build** it — edit `engine/march_params.json` (the live knobs) or one engine file.
+4. **Test** — `./loop/render_tick.sh <iter>` renders the canonical woman IN-PROCESS
+   (method=march, levels 111; NOT via the Flask app, so engine edits take effect),
+   writing `loop/output/iter_NNN.{svg,png,stats.json}`.
+5. **Document** in `EXPERIMENT_LOG.md` — hypothesis, change, result, next step.
 
-Then exit. The shell loops back.
+Then exit. The shell loops back, scoring (`score_tick.sh`) and guarding
+(`guard_tick.sh`) the tick automatically.
+
+## Per-tick generated artifacts (git-ignored; the agent's "legible environment")
+
+The harness assembles these every tick so the inner agent reasons from one live,
+self-consistent view instead of stale prose — and so config can't silently drift:
+
+| Artifact | Written by | What it is |
+|---|---|---|
+| `STATUS.md` | `score_tick.sh` → `status.py` | Live knobs+bounds, metrics trend, best `d_fine`, last guard verdict. **Read first each tick.** |
+| `output/_latest_compare.png` | `render_tick.sh` → `montage.py` | Montage: source \| current \| best-so-far \| artist target, metrics annotated. |
+| `output/_best.png` / `_best.json` | `guard_tick.sh` | Snapshot of the highest-`d_fine` tick so the montage can show current-vs-best. |
+| `.guard_feedback` | `guard_tick.sh` | One-line "why kept/reverted + what to try" — folded into `STATUS.md` for the next tick. |
+| `EXPERIMENT_DIGEST.md` | `score_tick.sh` → `distill.py` | `EXPERIMENT_LOG.md` distilled to ✅ helped / ❌ ruled out / 🔁 open. |
+
+`loop/tests/doc_freshness.sh` (in the harness) fails the build if the tuning docs
+(`CLAUDE.md`, `PROMPT.md`, `IDEAS.md`) ever pin a `MARCH_*` value — those live ONLY
+in `engine/march_params.json` (mirrored into `STATUS.md`), so they can't go stale.
+`render_tick.sh` also garbage-collects old `iter_NNN.*` dumps (keeps the most recent
+`OUTPUT_KEEP`, default 20).
 
 ## Pre-flight checklist
 

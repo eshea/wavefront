@@ -15,29 +15,33 @@ in ~0.45–0.60 while pushing the look closer to the artist. **`d_score` is alre
 tone fidelity, baseline ≈0.47 → artist ≈0.73; see PROMPT.md). Raise `d_fine` while
 keeping `d_score`=100 and `d_diag` in band.
 
-**How to use this each tick:** read the latest metrics (`d_fine`, `d_score`,
-`d_fidelity`, `d_tone`, `d_diag`, `d_ink`), find the ONE matching symptom below,
-make that one bounded move. Don't nudge the same knob twice in a row — if the last
-2 ticks touched a knob and `d_fine` didn't move, pick a different symptom.
+**How to use this each tick:** read `loop/STATUS.md` first — it shows the LIVE knob
+values + their bounds (from `engine/march_params.json` / `PARAM_BOUNDS`) and the
+recent `d_fine`/`d_score`/`d_fidelity`/`d_tone`/`d_diag`/`d_ink` trend. Find the ONE
+matching symptom below, then make a small bounded move FROM the current value shown in
+STATUS.md (this menu gives directions, not numbers — the numbers live in the JSON so
+they can't go stale). Don't nudge the same knob twice in a row — if the last 2 ticks
+touched a knob and `d_fine` didn't move, pick a different symptom.
 
-## The menu — symptom → knob move (current → try), all in engine/march.py
+## The menu — symptom → direction (all knobs in engine/march_params.json)
 
-| If the symptom is… | Change | Current → try |
-|---|---|---|
-| Hatch too COARSE to render fine local tone (`d_fine` low/flat) | finer/denser hatch: `levels` up, or `MARCH_TONE` up | 111→130 / 4.6→5.2 |
-| Output doesn't render the image's TONES (`d_tone` low) | `MARCH_TONE` up (darks bunch denser) | 4.6 → 5.2 |
-| Diamonds too STIFF/geometric (`d_diag`>0.62) | `MARCH_BASE` down (image warps more) | 0.3 → 0.2 |
-| Diamonds OVER-warped / no diamond read (`d_diag`<0.45) | `MARCH_BASE` up | 0.3 → 0.5 |
-| Dark regions go SOLID black / muddy (`d_ink`>0.7) | `MARCH_TONE` down, or `MARCH_CONTRAST` up | 4.6→4.0 / 1.4→1.8 |
-| Feature boundaries (eyes/nose/jaw) not defined | `MARCH_EDGE` up | 4.0 → 5.0 |
-| Subject washed out / midtones flat (`d_fidelity` low) | `MARCH_CONTRAST` up or `MARCH_GAMMA` >1 | 1.4→1.8 / 1.0→1.3 |
-| Background busy / noisy fine lines (`d_peakedness` low) | `MARCH_BLUR` up, or `MARCH_BASE` up | 2.0→3.5 / 0.3→0.5 |
-| Output too dense / too sparse overall | `levels` (render param) down / up | 111 → 90 / 130 |
+| If the symptom is… | Move (one small step from the live value in STATUS.md) |
+|---|---|
+| Hatch too COARSE to render fine local tone (`d_fine` low/flat) | finer/denser hatch: `levels` up, or `MARCH_TONE` up |
+| Output doesn't render the image's TONES (`d_tone` low) | `MARCH_TONE` up (darks bunch denser) |
+| Diamonds too STIFF/geometric (`d_diag` above band) | `MARCH_BASE` down (image warps more) |
+| Diamonds OVER-warped / no diamond read (`d_diag` below band) | `MARCH_BASE` up |
+| Dark regions go SOLID black / muddy (`d_ink` high) | `MARCH_TONE` down, or `MARCH_CONTRAST` up |
+| Feature boundaries (eyes/nose/jaw) not defined | `MARCH_EDGE` up |
+| Subject washed out / midtones flat (`d_fidelity` low) | `MARCH_CONTRAST` up, or `MARCH_GAMMA` up |
+| Background busy / noisy fine lines (`d_peakedness` low) | `MARCH_BLUR` up, or `MARCH_BASE` up |
+| Output too dense / too sparse overall | `levels` (render param) down / up |
 
-Keep moves small (one step in the suggested direction). If a move helped (raised
-`d_fine` without dropping `d_score`), the guard keeps it; next tick address the
-next gap. NOTE on `d_fine`: heavy `MARCH_BLUR` lowers it (kills fine detail);
-denser/finer hatch raises it — but watch `d_ink` (>0.85 trips the gate to 0).
+Keep moves small (one step in the suggested direction, staying inside the knob's
+bounds shown in STATUS.md). If a move helped (raised `d_fine` without dropping
+`d_score`), the guard keeps it; next tick address the next gap. NOTE on `d_fine`:
+heavy `MARCH_BLUR` lowers it (kills fine detail); denser/finer hatch raises it — but
+watch `d_ink` (too high trips the gate to 0).
 
 **Knobs live in `engine/march_params.json`** (overrides the `march.py` defaults) —
 edit that JSON to tune one per tick. **To sweep all 6 at once** (better than

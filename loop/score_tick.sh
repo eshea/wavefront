@@ -68,3 +68,8 @@ print(f\"[score_tick] iter {r.get('iter','?')}: d_score={r.get('d_score','?')} \
       f\"(fid={r.get('d_fidelity','?')} style={r.get('d_style','?')}) \"
       f\"ink={r.get('d_ink','?')} peak={r.get('d_peakedness','?')}\")
 "
+
+# Refresh the experiment digest, then the agent's live situational view (STATUS.md).
+# Both are best-effort: never fail scoring over a reporting artifact.
+python loop/distill.py >/dev/null 2>&1 || true
+python loop/status.py "$iter_num" || echo "[score_tick] status refresh skipped" >&2

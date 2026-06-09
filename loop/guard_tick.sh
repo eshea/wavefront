@@ -107,8 +107,47 @@ decision=${verdict%% *}
 reason=${verdict#* }
 ts=$(date '+%Y-%m-%d %H:%M:%S')
 
+# Remediation note → loop/.guard_feedback. status.py folds this into STATUS.md so the
+# NEXT tick's agent sees WHY the prior change was kept/reverted (the harness-engineering
+# "inject remediation into the agent's context"). Map the verdict to a concrete nudge.
+case "$reason" in
+  regression-fine*) suggest="That change traded away fine-hatch tone fidelity (d_fine). It was reverted — try a DIFFERENT idea category (see IDEAS.md), not the same knob." ;;
+  regression*)      suggest="That change regressed the primary d_score. Reverted — try a qualitatively different approach, or check d_diag/d_ink for what broke." ;;
+  below-floor*)     suggest="Output was degenerate (below floor). Reverted — check the dscore gate inputs (d_ink in 0.05–0.85, d_peakedness, d_diag in band)." ;;
+  no-*|no\ *)       suggest="No score for this tick (render/score skipped). Re-run render_tick.sh + score_tick.sh before tuning." ;;
+  *)                suggest="Kept as a checkpoint. Address the next-lowest metric in STATUS.md (steer by d_fine while d_score holds at 100)." ;;
+esac
+printf '_iter %03d · %s_\n\n- **%s** — %s\n- %s\n' \
+  "$iter_num" "$ts" "$decision" "$reason" "$suggest" > loop/.guard_feedback
+
 case "$decision" in
   PASS)
+    # Best-so-far pointer: if this tick set a new max d_fine, snapshot its PNG so the
+    # montage can show "current vs best" honestly. Pure read of metrics.jsonl.
+    python3 - "$iter_num" <<'PY' || true
+import json, shutil, sys
+from pathlib import Path
+it = int(sys.argv[1])
+rows = []
+for ln in Path("loop/metrics.jsonl").read_text().splitlines():
+    ln = ln.strip()
+    if ln:
+        try: rows.append(json.loads(ln))
+        except json.JSONDecodeError: pass
+cur = next((r for r in reversed(rows) if r.get("iter") == it), None)
+if not cur or not isinstance(cur.get("d_fine"), (int, float)):
+    sys.exit(0)
+prior = [r["d_fine"] for r in rows
+         if r.get("iter") != it and isinstance(r.get("d_fine"), (int, float))]
+if prior and cur["d_fine"] <= max(prior):
+    sys.exit(0)   # not a new best
+png = Path(f"loop/output/iter_{it:03d}.png")
+if png.exists():
+    shutil.copyfile(png, "loop/output/_best.png")
+    Path("loop/output/_best.json").write_text(
+        json.dumps({"iter": it, "d_fine": cur["d_fine"]}))
+    print(f"[guard] new best d_fine={cur['d_fine']:.3f} (iter {it:03d}) → _best.png")
+PY
     if git diff --quiet -- engine/ 2>/dev/null; then
       echo "[guard] PASS ($reason) — engine/ unchanged, nothing to checkpoint"
     elif [ -n "${GUARD_NO_COMMIT:-}" ]; then
