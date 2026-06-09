@@ -70,3 +70,9 @@ loop/sweep_best.svg
 !loop/march_sample_balanced.svg
 !loop/march_sample_diamond.png
 !loop/march_sample_diamond.svg
+
+# Force-track the scorer's hard-negative fixtures — committed test assets that
+# loop/tests/dscore_calib.sh scores against (the *.png rule above would ignore
+# them). Regenerable via `python loop/tests/make_hard_negatives.py` (human-run).
+!loop/tests/fixtures/hard_neg/*.png
+!loop/tests/fixtures/borderline/*.png

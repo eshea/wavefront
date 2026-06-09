@@ -12,20 +12,33 @@ The score has two metric families:
      *source* re-expressed as flowing contour lines: lines bunch/darken/bend
      where the source has edges and tone, and flow as clean parallel waves
      where it's flat. So we compare the output to its OWN source — which is
-     perfectly aligned (same composition) — at a COARSE grid. We correlate a
-     source "saliency" map (edges + local contrast + inverted luminance)
-     against an output "activity" map (line density + local line curvature).
-     This is what makes the subject recognisable and the density
-     tone-modulated. Comparing the output to a *reference output* (the old
-     ssim/edge_iou approach) fails: two line drawings' strokes never align,
-     so those metrics are flat across good and bad.
+     perfectly aligned (same composition). The dominant term is MULTI-SCALE
+     tonal-structure fidelity: SSIM between the output's ink-density map and the
+     source's darkness map across coarse→fine grids (so getting GLOBAL darkness
+     right is not enough — local tone must match too). Secondary: a correlation
+     of a source "saliency" map (edges + contrast + inverted luminance) against
+     an output "activity" map (line density + curvature). Comparing the output
+     to a *reference output* (the old ssim/edge_iou / PSNR approach) fails: two
+     line drawings' strokes never align, so those metrics are flat across good
+     and bad.
 
   B. STYLE (necessary-but-not-sufficient). Does it look like the VEX-LINE
      family at all? Dominant line spacing (radius-whitened radial FFT), ink
      coverage band, and orientation coherence — each scored by distance from
-     the good-output library's profile.
+     the good-output library's profile. NOTE: style carries LESS weight than
+     fidelity because these descriptors are non-discriminating in practice —
+     they read ~0.95+ for genuine art AND for smudgy/over-dense negatives.
 
 Degenerate output (near-blank, near-solid, no line structure) is gated to ~0.
+
+WHAT'S DELIBERATELY ABSENT (tried and rejected, see loop/tests/fixtures/README.md
+and docs/algorithm.md): a free-floating style descriptor matched against the artist
+*output* renderings, and FID/LPIPS perceptual distance. The artist's good outputs
+span a WIDE manifold (sparse-clean diamonds, dense fine-hatching, busy flowing
+waves), so a global appearance descriptor rates off-aesthetic renders as MORE
+artist-like than the artists themselves — it doesn't separate good from bad. FID
+needs an Inception net + hundreds of samples (we have ~5 refs) and torch, which
+breaks the "fully local, no-backend" property this scorer exists to provide.
 
 The calibration constants in ``CALIB`` below were fit so the artist's
 good outputs (examples/space, examples/woman) land ~95 and synthesized
@@ -54,7 +67,13 @@ from skimage.metrics import structural_similarity as ssim
 # ── working resolutions ──────────────────────────────────────────────────
 WORK = 384          # square grid for source-fidelity (384 = 48*8, clean pool)
 GRID_N = 48         # coarse cells per side for the saliency/activity maps
-TONE_N = 32         # coarser grid for tonal-structure fidelity (384 = 32*12)
+# Multi-scale tonal-structure fidelity: SSIM(output ink-density, source darkness)
+# at several grids, fine scales weighted more. A single coarse grid (the old
+# TONE_N=32) only checks that GLOBAL darkness is roughly right — an output that
+# gets the broad blobs right but the local tone wrong still scored high. The 64-grid
+# term forces LOCAL tone to match too, which is harder to satisfy by accident.
+TONE_SCALES = (16, 32, 64)
+TONE_WEIGHTS = (0.25, 0.40, 0.35)
 STYLE_WORK = 512    # square grid for the FFT / style stats
 INK_THRESH = 160    # px < this = "inked" (tolerant of AA / JPEG'd line edges)
 
@@ -78,8 +97,13 @@ CALIB = {
     # engine render to climb toward the 0.50 ideal. Applied as a multiplicative factor.
     "diam_mu": 0.50, "diam_sigma": 0.12,
     "diam_floor": 0.45,    # factor = diam_floor + (1-diam_floor)*diamond_score
-    # fidelity rescale: a genuinely-matched pair correlates ~0.24-0.30, not ~1.
-    # fid_score = clip(fidelity_raw / FID_FULL, 0, 1). Anchored on the space pair.
+    # fidelity rescale: a genuinely-matched pair scores fidelity_raw ~0.24-0.6, not
+    # ~1. fid_score = clip(fidelity_raw / FID_FULL, 0, 1). Anchored LOW (at the floor
+    # of the artist band, samurai/woman4 ~0.24) ON PURPOSE: the sparse-clean diamond
+    # ideal (woman4) has the LOWEST tone-fidelity of all the good outputs (sparse
+    # lines correlate less with the full darkness map than dense hatching does), so
+    # raising this to "spread" scores would rank the target aesthetic BELOW denser
+    # styles. The genuinely-bad modes are separated by having ~0 tone, not by this.
     "FID_FULL": 0.28,
     # style sub-weights
     "w_freq": 0.55, "w_ink": 0.20, "w_coh": 0.25,
@@ -160,22 +184,43 @@ def output_activity(out: np.ndarray, n: int = GRID_N) -> np.ndarray:
     return _norm(O)
 
 
+def tone_fidelity_ms(src_work: np.ndarray, out_work: np.ndarray) -> dict:
+    """Multi-scale tonal-structure fidelity (MS-SSIM in spirit).
+
+    SSIM between the output's local ink-density map and the source's darkness map
+    at several grid resolutions (TONE_SCALES), weighted toward the FINE scales
+    (TONE_WEIGHTS). Returns the weighted sum plus the per-scale values for diagnostics.
+    """
+    dark_full = 255.0 - src_work
+    per_scale = {}
+    tone_ms = 0.0
+    for n, w in zip(TONE_SCALES, TONE_WEIGHTS):
+        blk = src_work.shape[0] // n
+        ink = (out_work < INK_THRESH).astype(np.float32)
+        dens = _norm(block_reduce(ink, (blk, blk), np.mean))
+        dark = _norm(block_reduce(dark_full, (blk, blk), np.mean))
+        win = 5 if n <= 16 else 7                       # odd, <= grid side
+        s = float(ssim(dens, dark, data_range=1.0, win_size=win))
+        per_scale[f"tone{n}"] = s
+        tone_ms += w * max(0.0, s)
+    return {"tone_ms": tone_ms, **per_scale}
+
+
 def fidelity(src_work: np.ndarray, out_work: np.ndarray) -> dict:
     """How faithfully the output renders the SOURCE.
 
-    The dominant term is TONAL-STRUCTURE fidelity: SSIM between the output's local
-    ink-density map and the source's darkness map. This is what separates a render
-    that actually depicts the subject (dense where the image is dark) from a
-    seed-centric diamond field whose density follows the geometry, not the image
-    (the latter's tone map is uncorrelated/anti-correlated — measured ~0 to -0.15,
-    vs +0.27..+0.86 for genuine artist outputs). The old edge-correlation term
-    alone was fooled — both satisfy it — so tone now leads, edge-corr is secondary.
+    The dominant term is multi-scale TONAL-STRUCTURE fidelity (tone_fidelity_ms):
+    SSIM between the output's local ink-density map and the source's darkness map,
+    across coarse→fine grids. This is what separates a render that actually depicts
+    the subject (dense where the image is dark) from a seed-centric diamond field
+    whose density follows the geometry, not the image (the latter's tone map is
+    uncorrelated/anti-correlated — measured ~0, vs +0.24..+0.7 for genuine artist
+    outputs). The multi-scale form also rejects a render that gets GLOBAL darkness
+    right but local tone wrong, which the old single 32-grid SSIM accepted. The
+    edge-correlation term alone was fooled — both satisfy it — so tone leads.
     """
-    blk = src_work.shape[0] // TONE_N
-    ink = (out_work < INK_THRESH).astype(np.float32)
-    dens = _norm(block_reduce(ink, (blk, blk), np.mean))
-    dark = _norm(block_reduce(255.0 - src_work, (blk, blk), np.mean))
-    tone = float(ssim(dens, dark, data_range=1.0, win_size=7))
+    ms = tone_fidelity_ms(src_work, out_work)
+    tone = ms["tone_ms"]
     # secondary: edge/saliency alignment (where the source has detail).
     S = source_saliency(src_work)
     O = output_activity(out_work)
@@ -183,7 +228,8 @@ def fidelity(src_work: np.ndarray, out_work: np.ndarray) -> dict:
     r = 0.0 if (sf.std() < 1e-9 or of.std() < 1e-9) \
         else float(np.corrcoef(sf, of)[0, 1])
     raw = 0.72 * max(0.0, tone) + 0.28 * max(0.0, r)
-    return {"r": r, "tone": tone, "fidelity_raw": raw}
+    return {"r": r, "tone": tone, "fidelity_raw": raw,
+            "tone16": ms["tone16"], "tone32": ms["tone32"], "tone64": ms["tone64"]}
 
 
 # ── Module B: style ──────────────────────────────────────────────────────
@@ -267,13 +313,16 @@ def score(out_path: Path, src_path: Path, style_only: bool = False) -> dict:
     diam_factor = CALIB["diam_floor"] + (1 - CALIB["diam_floor"]) * st["diamond_score"]
 
     if style_only:
-        fid = {"r": None, "tone": None, "fidelity_raw": None}
+        fid = {"r": None, "tone": None, "fidelity_raw": None,
+               "tone16": None, "tone32": None, "tone64": None}
         combined = st["style_raw"] * gate * diam_factor
     else:
         src_w = load_gray_work(src_path, WORK)
         fid = fidelity(src_w, out_w)
         fid_score = min(1.0, fid["fidelity_raw"] / CALIB["FID_FULL"])
-        combined = (0.6 * fid_score + 0.4 * st["style_raw"]) * gate * diam_factor
+        # Tone-fidelity LEADS (style Gaussians are non-discriminating — they read
+        # ~0.95+ for genuine art AND for smudgy negatives — so they get less weight).
+        combined = (0.65 * fid_score + 0.35 * st["style_raw"]) * gate * diam_factor
 
     lo, hi = CALIB["C_LO"], CALIB["C_HI"]
     d = int(round(100 * float(np.clip((combined - lo) / (hi - lo), 0.0, 1.0))))
@@ -284,6 +333,9 @@ def score(out_path: Path, src_path: Path, style_only: bool = False) -> dict:
         "d_style": round(st["style_raw"], 4),
         "d_r": None if fid["r"] is None else round(fid["r"], 4),
         "d_tone": None if fid["tone"] is None else round(fid["tone"], 4),
+        "d_tone16": None if fid.get("tone16") is None else round(fid["tone16"], 4),
+        "d_tone32": None if fid.get("tone32") is None else round(fid["tone32"], 4),
+        "d_tone64": None if fid.get("tone64") is None else round(fid["tone64"], 4),
         "d_freq_peak": st["freq_peak"],
         "d_peakedness": round(st["peakedness"], 3),
         "d_ink": round(st["ink"], 4),

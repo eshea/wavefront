@@ -56,6 +56,12 @@ not read from `loop/holdout/`. Do not score against it. Do not use it
 for any inspiration. The harness will run it separately when humans
 want to check for overfitting.
 
+**SCORER FIXTURES — ALSO DO NOT TOUCH:** `loop/tests/fixtures/` holds the
+hard-negative corpus that gates the scorer (`dscore_calib.sh`). Do not read,
+score against, or take inspiration from it — these are deliberately-bad renders
+whose only job is to keep the scorer honest. Tuning toward them would defeat the
+gate. They are regenerated only by a human via `make_hard_negatives.py`.
+
 ## QUANTITATIVE SIGNAL (read before deciding)
 
 After each tick, `loop/score_tick.sh` runs automatically and appends
@@ -66,12 +72,13 @@ one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
   SOURCE as flowing contour lines. It compares the output to its **own source**
   (the canonical woman portrait, recorded in the render's `stats.json`) at a coarse
   scale. Two parts:
-  - `d_fidelity` — source-fidelity, dominated by **`d_tone`**: SSIM between the
-    output's local ink-density and the SOURCE's darkness — i.e. does the output
-    actually render the image's tones (dense where the image is dark)? This is THE
-    discriminating signal. The march geodesic drives it positive (canonical
-    `d_tone`≈0.74, artist ~0.71); a field that ignores the image (the old additive
-    wave) had `d_tone`≈0/negative and scored ~47. Keep `d_tone` high.
+  - `d_fidelity` — source-fidelity, dominated by **`d_tone`**: a MULTI-SCALE SSIM
+    (grids 16/32/64, see `d_tone16/32/64`) between the output's local ink-density
+    and the SOURCE's darkness — i.e. does the output actually render the image's
+    tones (dense where the image is dark) AT EVERY SCALE, not just globally? This is
+    THE discriminating signal. The march geodesic drives it positive (canonical
+    `d_tone`≈0.69, artist 0.24–0.67); a field that ignores the image (the old
+    additive wave) had `d_tone`≈0/negative and scores ~43. Keep `d_tone` high.
   - `d_style` — does it look like the VEX-LINE family at all: dominant line
     spacing (`d_freq_peak`, `d_peakedness`), ink band (`d_ink`), orientation.
   - **diamond term** (`d_diamond`, from `d_diag`) — a strong multiplicative factor
@@ -80,8 +87,16 @@ one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
     flowing waves**. This is why `method=flow` (horizontal carrier) now scores
     LOW — the target is diamonds. `d_diag` ≈ 0.50–0.57 is the artist band;
     ≈ 0.28 (axis-aligned) and ≈ 0.86 (over-regular moiré) are both penalised.
-  Calibrated so the artist's good outputs score ~95 and degenerate output
-  (blank/solid/blob/noise) ~0. Current engine attempts have real headroom.
+  Calibrated so the artist's good outputs score 85–100 (busy-source samurai ~75),
+  degenerate output (blank/solid/blob/noise) ~0, and committed plausible-but-wrong
+  hard negatives (`loop/tests/fixtures/hard_neg/`) ≤55 with a ≥20-point margin below
+  the worst good (`dscore_calib.sh` enforces this — it's the anti-false-hill-climb
+  lock). NOTE: the canonical woman render already scores ~100 on `d_tone`; the
+  remaining gap to the artist is *qualitative* (line cleanliness, spacing,
+  recognisability) and the metric is deliberately NOT sensitive to every such
+  difference — a higher `d_score` is necessary, not sufficient. Some off-aesthetic
+  renders (`loop/tests/fixtures/borderline/`) are metrically inside the legit artist
+  band and intentionally NOT penalised; don't expect the score to catch those.
 - `ink_coverage`, `ssim`, `edge_iou`, `path_fit` — legacy pixel co-signals only;
   near-flat across good/bad, recorded but **don't chase them**.
 

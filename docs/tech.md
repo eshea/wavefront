@@ -61,8 +61,9 @@ the preview canvas).
 - **Active method is `march`** (`build_march_field`, the tone-cost geodesic) — what
   `render_tick.sh` renders and the loop tunes (`MARCH_*` knobs). `wave`
   (`build_wave_field`), `contour` (`build_field`) and `flow` are parked; leave them
-  unless explicitly working on them. (Note: the Flask API's own `method` default is
-  still `contour`; the loop overrides it.)
+  unless explicitly working on them. The Flask API and web UI now default to `march`
+  with the canonical "woman output" settings (levels 111, smooth 0.0, lum_mix 0.8,
+  wt_range 0.0) — the same baked settings `render_tick.sh` uses.
 
 ## The ralph loop (`loop/`)
 
@@ -76,12 +77,27 @@ logs to `EXPERIMENT_LOG.md`. A held-out set (`loop/holdout/`) guards overfitting
 — **never read, score, or train against it.**
 
 Scoring is **deterministic** (`dscore.py`, `d_score` 0–100): it compares the
-output to its **own source** at a coarse scale — source-fidelity (subject
-recognizable / density tone-modulated) + style (line-spacing FFT, ink band,
-orientation). No network, no backend, reproducible. Calibrated so the artist's
-good outputs (`examples/space`, `examples/woman`) score ~95 and degenerate output
-~0 (`loop/tests/dscore_calib.sh` is the acceptance gate). See `loop/README.md`
-for budgets, stop controls, and cost.
+output to its **own source** — source-fidelity (subject recognizable / density
+tone-modulated) + style (line-spacing FFT, ink band, orientation). The dominant
+term is **multi-scale tonal-structure fidelity**: SSIM between the output's
+ink-density and the source's darkness across grids 16/32/64 (so getting *global*
+darkness right is no longer enough — local tone must match too). No network, no
+backend, reproducible. Calibrated so the artist's good outputs (`examples/space`,
+`examples/woman`) score 85–100, degenerate output ~0, and committed
+**plausible-but-wrong hard negatives** (`loop/tests/fixtures/hard_neg/`) score
+≤55 with a ≥20-point margin below the worst good. That margin is the
+**anti-false-hill-climb lock**: any change that inflates a smudgy/inverted render
+flips the gate (`loop/tests/dscore_calib.sh`) red.
+
+**Deliberately not used** (tried, measured, rejected — see the `dscore.py` module
+docstring and `loop/tests/fixtures/README.md`):
+PSNR and reference-output SSIM/edge-IoU (two line drawings never align pixel-wise);
+a free-floating style descriptor matched to the artist *outputs* (the legit artist
+style is wide enough — sparse diamonds, dense hatching, flowing waves — that a
+global appearance descriptor rates off-aesthetic renders as *more* artist-like than
+the artists); and FID/LPIPS (needs an Inception/VGG net + torch + hundreds of
+samples, breaking the local/no-backend property — a torch perceptual co-signal is a
+documented future hook only). See `loop/README.md` for budgets, stop controls, and cost.
 
 ## Operational notes
 
