@@ -9,8 +9,8 @@ relevant doc in the same change.
 |---|---|
 | [vision.md](vision.md) | What WAVEFRONT is, why it exists, what "good" means, scope (CORE parity → STUDIO roadmap) |
 | [tech.md](tech.md) | Stack, request flow, architecture, key design points, ops notes |
-| [algorithm.md](algorithm.md) | The current `method=contour` pipeline, step by step (the authoritative algorithm reference) |
-| [contour-v-core-source.md](contour-v-core-source.md) | The replication target — verified first-party facts (Ko-fi product copy, demo video, Reddit). Read before changing the field. |
+| [algorithm.md](algorithm.md) | The current `method=march` pipeline (fast marching, reciprocal cost), step by step (the authoritative algorithm reference) |
+| [contour-v-core-source.md](contour-v-core-source.md) | The replication target — verified first-party facts (Ko-fi product copy, demo video, Reddit, the STUDIO screenshot decode). Read before changing the field. |
 | [research.md](research.md) | Early research notes on the VEX-LINE aesthetic and field derivation (partly superseded — see header) |
 | [vex-engine-reverse-engineering.md](vex-engine-reverse-engineering.md) | Working log: UI/HUD reverse-engineering and formula derivation (partly superseded — see header) |
 
