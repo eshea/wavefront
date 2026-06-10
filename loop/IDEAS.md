@@ -52,6 +52,20 @@ single-knob reasoning / understanding *why* a move helps; the optimizer is for
 finding the joint optimum (knobs interact — e.g. `BASE`↑ recovers the `d_diag` that
 `FLOOR`↓ erodes).
 
+## ⚠️ Scorer calibration debt (2026-06-09, post-reciprocal-cost)
+The first optimizer run on the reciprocal surface maximized woman `d_fine` to
+0.62 — and produced a render VISUALLY WORSE than the hand defaults (stiff
+diamond grain, solid darks lost; see `loop/optimize_log.jsonl`). Two causes:
+(1) `d_fine` rewards uniform fine hatch over the artist's solid-ink dark
+saturation; (2) the `d_diag`/diamond window + the woman `d_score` floor of 95
+penalize the stronger image-warp of the artist-accurate look (the defaults
+score 93 — *below the optimizer's own feasibility floor* — while matching the
+artist best). Until the scorer is recalibrated against the new engine (rescore
+the artist examples, re-fit the diamond window, reconsider what `d_fine`
+measures), treat optimizer output as a CANDIDATE to eyeball against
+`examples/`, not an auto-win. The committed `march_params.json` is the
+visually-validated config, not the metric optimum.
+
 ## Notes / breadth (lower priority)
 - `MARCH_FLOOR` is THE tone lever (reciprocal cost: speed floor → how dark the darks
   go; lower = solid-ink shadows). `MARCH_BASE` trades diamond-stiffness vs
