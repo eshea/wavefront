@@ -19,7 +19,7 @@ import engine.flow as efl
 import engine.march as em
 from engine.field import load_and_preprocess, to_luminance, build_field, build_wave_field
 from engine.contour import extract_contours, scale_contours
-from engine.smooth import smooth_contours
+from engine.smooth import resample_contours, smooth_contours
 from engine.export import contours_to_svg_string_fast
 from engine.flow import trace_flow_lines
 from engine.march import build_march_field
@@ -60,7 +60,7 @@ METHOD_KNOBS = {
     ],
     # march knobs + ranges come straight from engine.march.PARAM_BOUNDS — single
     # source of truth, so the UI sliders match the optimizer's search/clamp box and
-    # the tuned march_params.json defaults (e.g. MARCH_TONE=12) render without being
+    # the tuned march_params.json defaults render without being
     # silently clamped by a stale UI range.
     'march': [(name.lower(), em, name, lo, hi)
               for name, (lo, hi) in em.PARAM_BOUNDS.items()] + [_THRESH],
@@ -249,6 +249,9 @@ def process():
                 else:
                     field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
                 contours, stats = extract_contours(field, levels, f_min, f_max)
+                # Fixed-step resample (STUDIO "STEP"): de-jitters raw marching-
+                # squares points before smoothing. Flow traces its own step.
+                contours = resample_contours(contours)
         stats['method'] = method
 
         contours = smooth_contours(contours, smooth)
@@ -258,7 +261,8 @@ def process():
         stats['segments'] = max(total_pts - stats['paths'], 0)
 
         export_contours = scale_contours(contours, processed_size, original_size)
-        svg_string = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range)
+        svg_string = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range,
+                                                 stroke_scale=orig_w / img_w)
 
         return jsonify({
             'svg': svg_string,

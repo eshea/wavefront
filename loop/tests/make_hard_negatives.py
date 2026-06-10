@@ -40,7 +40,7 @@ the gate without false-rejecting real artist outputs (the artist's own flowing
 samurai and dense woman-2 share their tone/diamond signatures). Kept as a documented
 caution: do NOT add them to the gate. See fixtures/README.md.
 
-  muddy        march, MARCH_TONE huge   -> shadows collapse to solid fill; metrically
+  muddy        march, MARCH_FLOOR ~0    -> shadows collapse to solid fill; metrically
                                            ~ the dense woman-2 artist output.
   axis_flow    method=flow              -> streamlines following the image; non-diamond
                                            aesthetic, but metrically ~ the artist's own
@@ -67,9 +67,9 @@ FIX = REPO / "loop" / "tests" / "fixtures"
 CONFIGS = [
     ("seed_blob",   "hard_neg",   {"method": "wave"},  {},                          False),
     ("moire",       "hard_neg",   {"method": "march"}, {"MARCH_BASE": 3.0,
-                                                        "MARCH_TONE": 1.0},         False),
+                                                        "MARCH_FLOOR": 0.9},        False),
     ("tone_invert", "hard_neg",   {"method": "march"}, {},                          True),
-    ("muddy",       "borderline", {"method": "march"}, {"MARCH_TONE": 48.0,
+    ("muddy",       "borderline", {"method": "march"}, {"MARCH_FLOOR": 0.005,
                                    "MARCH_BASE": 0.05, "MARCH_BLUR": 0.5},          False),
     ("axis_flow",   "borderline", {"method": "flow"},  {},                          False),
 ]
@@ -94,11 +94,11 @@ def main() -> int:
         (FIX / subdir).mkdir(parents=True, exist_ok=True)
         prior = _apply(overrides)
         if invert:
-            # Swap dark<->gray so cost bunches lines where the image is BRIGHT,
+            # Invert gray so the wave is FAST in dark and SLOW in bright,
             # producing density anti-correlated with the true source darkness.
             def _inverted(lum, _orig=orig_pre):
-                gray, dark, edge = _orig(lum)
-                return dark, gray, edge
+                gray, edge = _orig(lum)
+                return 1.0 - gray, edge
             march._preprocess_gray = _inverted
         try:
             _, png_path, _, _ = render(

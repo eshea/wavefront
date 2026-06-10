@@ -27,7 +27,8 @@ offenders = []
 
 # ── Check 1: tuned MARCH_* knobs must not be pinned in the tuning docs ───────
 TUNING_DOCS = ["CLAUDE.md", "loop/PROMPT.md", "loop/IDEAS.md"]
-KNOBS = "BASE|TONE|EDGE|GAMMA|CONTRAST|BLUR"   # the 6 searched knobs (PARAM_BOUNDS)
+KNOBS = "BASE|FLOOR|TONE|EDGE|GAMMA|CONTRAST|BLUR"   # the 6 searched knobs
+                                                     # (PARAM_BOUNDS) + legacy TONE
 KNOB = re.compile(rf"MARCH_(?:{KNOBS})\b")
 DECIMAL = re.compile(r"\d+\.\d+")
 CURRENTLY = re.compile(r"[Cc]urrently\s+~?\d")   # catches a value when the knob name

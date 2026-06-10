@@ -30,14 +30,15 @@ app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    ├─ engine.field.load_and_preprocess   resize to MAX_DIM=800, keep original size
    ├─ engine.field.to_luminance          BT.601 luma
    ├─ field construction (one of):
-   │     march.build_march_field method=march (ACTIVE — 4-connected geodesic; dark=denser, renders tones)
+   │     march.build_march_field method=march (ACTIVE — fast marching, reciprocal cost; darks go solid)
    │     build_wave_field    method=wave     (parked — additive L1-diamond field; d_tone≈0)
    │     build_field        method=contour  (parked baseline — simpler uniform formula)
    │     flow.trace_flow_lines method=flow   (parked experiment)
-   ├─ engine.contour.extract_contours    Marching Squares at power-spaced levels
+   ├─ engine.contour.extract_contours    Marching Squares at power-spaced levels (T-max clip, min-pts)
+   ├─ engine.smooth.resample_contours    fixed-step arclength resample (STUDIO "STEP")
    ├─ engine.smooth.smooth_contours      Chaikin corner-cutting
    ├─ engine.contour.scale_contours      processing grid → original dimensions
-   └─ engine.export.contours_to_svg_string_fast   adaptive stroke-weight SVG
+   └─ engine.export.contours_to_svg_string_fast   constant-ink SVG (modulation opt-in via wt_range)
    ▼
 JSON { svg, stats, img/processing dims, seed } → browser renders + offers export
 ```
@@ -64,7 +65,7 @@ the preview canvas).
   black-box tuner) writes and the loop edits. `engine.march` exposes
   `current_params/apply_params/save_params/load_params` + `PARAM_BOUNDS` as the
   search surface; `app.py`'s per-request overrides still ride on top.
-- **Active method is `march`** (`build_march_field`, the tone-cost geodesic) — what
+- **Active method is `march`** (`build_march_field`, fast marching with reciprocal cost) — what
   `render_tick.sh` renders and the loop tunes (`MARCH_*` knobs). `wave`
   (`build_wave_field`), `contour` (`build_field`) and `flow` are parked; leave them
   unless explicitly working on them. The Flask API and web UI now default to `march`

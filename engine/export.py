@@ -1,33 +1,45 @@
 """
 SVG export for WAVEFRONT contour output.
 
-Generates plotter-ready SVG with adaptive stroke weights based on
-field value (low T = thick/dark near seed, high T = thin/faint at edges).
+Default is plotter ink: a CONSTANT full-opacity black stroke (~0.7 px on the
+processing grid), matching CONTOUR-V (STUDIO shows STROKE 0.70 with STROKE MOD
+off — a plotter has one pen). Weight/opacity modulation (thick/dark near seed,
+thin/faint far away) is OPT-IN via wt_range > 0, the STROKE MOD equivalent.
 """
 
 import svgwrite
+
+
+# Constant stroke width in PROCESSING-GRID pixels (CONTOUR-V STUDIO: 0.70).
+# Callers pass stroke_scale = original_width / grid_width so the exported SVG
+# (in original-image coordinates) keeps the same visual weight.
+STROKE_WIDTH = 0.75
 
 
 def compute_stroke(normalized_t, wt_range):
     """
     Compute stroke width and opacity for a contour line.
 
-    Lines near the seed (low normalized_t) are thicker and darker.
-    Lines far from the seed (high normalized_t) are thinner and lighter.
+    wt_range == 0 (the default): constant STROKE_WIDTH at full opacity — the
+    plotter-ink look of the reference outputs. wt_range > 0 enables modulation:
+    lines near the seed (low normalized_t) are thicker and darker, far lines
+    thinner and lighter, scaled by wt_range.
 
     Args:
         normalized_t: float 0–1, position in field range
-        wt_range: float 0–1, weight variation strength
+        wt_range: float 0–1, weight variation strength (0 = constant ink)
 
     Returns:
         (stroke_width, stroke_opacity) tuple of floats
     """
+    if wt_range <= 0:
+        return STROKE_WIDTH, 1.0
     width = max(0.2, 1.4 - normalized_t * wt_range * 1.2)
-    opacity = max(0.35, 0.95 - normalized_t * 0.4)
+    opacity = max(0.35, 0.95 - normalized_t * 0.4 * wt_range)
     return round(width, 3), round(opacity, 3)
 
 
-def contours_to_svg(contours, img_width, img_height, wt_range=0.6):
+def contours_to_svg(contours, img_width, img_height, wt_range=0.0, stroke_scale=1.0):
     """
     Convert contour list to SVG string using svgwrite.
 
@@ -38,7 +50,9 @@ def contours_to_svg(contours, img_width, img_height, wt_range=0.6):
         contours: list of dicts with 'points' (N,2) [row,col] and 'normalized_t'
         img_width: int, SVG canvas width in pixels
         img_height: int, SVG canvas height in pixels
-        wt_range: float, stroke weight variation
+        wt_range: float, stroke weight variation (0 = constant plotter ink)
+        stroke_scale: multiply stroke widths by this (original px per grid px),
+            so width keeps its processing-grid visual weight after upscaling
 
     Returns:
         svg_string: str, complete SVG document
@@ -61,6 +75,7 @@ def contours_to_svg(contours, img_width, img_height, wt_range=0.6):
 
         norm_t = c['normalized_t']
         width, opacity = compute_stroke(norm_t, wt_range)
+        width = round(width * stroke_scale, 3)
 
         coords = [(round(float(pt[1]), 1), round(float(pt[0]), 1)) for pt in pts]
 
@@ -79,7 +94,8 @@ def contours_to_svg(contours, img_width, img_height, wt_range=0.6):
     return dwg.tostring()
 
 
-def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.6):
+def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.0,
+                                stroke_scale=1.0):
     """
     Fast string-building SVG export (avoids svgwrite overhead for large path counts).
     Preferred for production use.
@@ -101,6 +117,7 @@ def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.6):
 
         norm_t = c['normalized_t']
         width, opacity = compute_stroke(norm_t, wt_range)
+        width = round(width * stroke_scale, 3)
 
         first = pts[0]
         d = f'M{first[1]:.1f},{first[0]:.1f}'

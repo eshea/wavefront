@@ -68,24 +68,25 @@ def recent_metrics(n=6):
 
 ACTIVE_NOTE = """# ACTIVE SURFACE — what actually affects the scored render
 The canonical render uses **method=march** (engine/march.py build_march_field — a
-4-connected GEODESIC where dark/edge pixels cost more, so contours BUNCH where the
-image is dark: tone-driven density that actually RENDERS the image's tones, while
-4-connectivity keeps L1 diamonds). This is the key win — the scorer's `d_tone`
-(does the output render the source's tones?) is the dominant signal, and march
-drives it positive. ONLY these module constants in engine/march.py change the output:
-  - MARCH_TONE      darkness -> extra cost (THE tone-fidelity lever). Higher =>
-                    darks bunch lines harder => denser shadows => higher d_tone.
-  - MARCH_EDGE      edge magnitude -> extra cost. Higher => lines pile up / deflect
-                    at feature boundaries (eyes/nose/jaw). Also lowers d_diag (more warp).
-  - MARCH_BASE      base per-step cost = diamond dominance. LOW (~0.3) => image warps
-                    the diamonds organically (d_diag~0.50); HIGH => stiff diamonds
-                    (d_diag>0.65, the diamond factor penalises it).
+4-connected FAST-MARCHING field with RECIPROCAL cost, the confirmed CONTOUR-V
+model: speed = clip(gray, MARCH_FLOOR, 1), cost = MARCH_BASE + lum_mix*(1/speed-1)
++ MARCH_EDGE*edge. Isoline spacing = level spacing / cost, so whites stay open,
+mids compress gently, and deep darks saturate to SOLID ink — tone-driven density
+that actually RENDERS the image's tones — while 4-connectivity keeps L1 diamonds).
+ONLY these module constants in engine/march.py change the output:
+  - MARCH_FLOOR     speed floor (THE tone lever). LOWER => deep darks cost up to
+                    1/FLOOR => solid-ink shadows => higher d_tone/d_fine.
+  - MARCH_EDGE      edge magnitude -> extra cost. Usually unnecessary — tonal
+                    pileup falls out of the reciprocal. Lowers d_diag (more warp).
+  - MARCH_BASE      flat per-step cost = diamond dominance. LOW => image warps
+                    the diamonds organically (d_diag in band); HIGH => stiff
+                    diamonds (d_diag above band, the diamond factor penalises it).
   - MARCH_CONTRAST / MARCH_GAMMA  tonal pre-shaping of the gray (contrast about mid,
                     then gamma) before the cost — shapes which tones drive density.
   - MARCH_BLUR      denoise sigma (tames busy source texture).
   - the render passes levels=111, lum_mix=0.8 (111 = CONTOUR-V CORE's CONTOURS density;
-    lum_mix scales MARCH_TONE). Watch d_ink: if shadows go solid black (d_ink>0.85)
-    the gate zeroes the score — ease MARCH_TONE or raise MARCH_CONTRAST.
+    lum_mix scales the tone term). Watch d_ink: if shadows go solid black (d_ink>0.85)
+    the gate zeroes the score — raise MARCH_FLOOR or raise MARCH_CONTRAST.
 IGNORE the WAVE_*/FLOW_*/FIELD_* constants and build_wave_field/trace_flow_lines —
 those are PARKED methods, NOT rendered now. Tune ONE MARCH_* value per tick by
 editing engine/march_params.json (the externalized config that overrides the

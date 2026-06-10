@@ -27,11 +27,11 @@ touched a knob and `d_fine` didn't move, pick a different symptom.
 
 | If the symptom is… | Move (one small step from the live value in STATUS.md) |
 |---|---|
-| Hatch too COARSE to render fine local tone (`d_fine` low/flat) | finer/denser hatch: `levels` up, or `MARCH_TONE` up |
-| Output doesn't render the image's TONES (`d_tone` low) | `MARCH_TONE` up (darks bunch denser) |
+| Hatch too COARSE to render fine local tone (`d_fine` low/flat) | finer/denser hatch: `levels` up, or `MARCH_FLOOR` down |
+| Output doesn't render the image's TONES (`d_tone` low) | `MARCH_FLOOR` down (darks bunch denser) |
 | Diamonds too STIFF/geometric (`d_diag` above band) | `MARCH_BASE` down (image warps more) |
 | Diamonds OVER-warped / no diamond read (`d_diag` below band) | `MARCH_BASE` up |
-| Dark regions go SOLID black / muddy (`d_ink` high) | `MARCH_TONE` down, or `MARCH_CONTRAST` up |
+| Dark regions go SOLID black / muddy (`d_ink` high) | `MARCH_FLOOR` up, or `MARCH_CONTRAST` up |
 | Feature boundaries (eyes/nose/jaw) not defined | `MARCH_EDGE` up |
 | Subject washed out / midtones flat (`d_fidelity` low) | `MARCH_CONTRAST` up, or `MARCH_GAMMA` up |
 | Background busy / noisy fine lines (`d_peakedness` low) | `MARCH_BLUR` up, or `MARCH_BASE` up |
@@ -50,11 +50,12 @@ constrained black-box search that maximizes woman `d_fine` while keeping
 samurai+space valid, and writes the winning JSON. The hand menu above is for
 single-knob reasoning / understanding *why* a move helps; the optimizer is for
 finding the joint optimum (knobs interact — e.g. `BASE`↑ recovers the `d_diag` that
-`TONE`↑ erodes).
+`FLOOR`↓ erodes).
 
 ## Notes / breadth (lower priority)
-- `MARCH_TONE` is THE tone-fidelity lever (darkness→cost→denser lines). `MARCH_BASE`
-  trades diamond-stiffness vs image-warp. They interact — keep moves to one per tick.
+- `MARCH_FLOOR` is THE tone lever (reciprocal cost: speed floor → how dark the darks
+  go; lower = solid-ink shadows). `MARCH_BASE` trades diamond-stiffness vs
+  image-warp. They interact — keep moves to one per tick.
 - `MARCH_CONTRAST / MARCH_GAMMA` are the CONTOUR-V STUDIO tonal controls baked into
   march's `_preprocess_gray` (percentile-normalize → contrast → gamma).
 - A bounded formula tweak inside `build_march_field` / `_preprocess_gray` is allowed

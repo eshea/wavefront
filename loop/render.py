@@ -36,7 +36,7 @@ sys.path.insert(0, str(REPO))
 from engine.field import (load_and_preprocess, to_luminance, build_field,  # noqa: E402
                           build_wave_field)
 from engine.contour import extract_contours, scale_contours  # noqa: E402
-from engine.smooth import smooth_contours  # noqa: E402
+from engine.smooth import resample_contours, smooth_contours  # noqa: E402
 from engine.export import contours_to_svg_string_fast  # noqa: E402
 from engine.flow import trace_flow_lines  # noqa: E402
 from engine.march import build_march_field  # noqa: E402
@@ -71,6 +71,8 @@ def render(iter_num, method="march", levels=111, smooth=0.0, lum_mix=0.8,
         else:
             field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
         contours, stats = extract_contours(field, levels, f_min, f_max)
+        # Fixed-step resample (STUDIO "STEP") — same placement as app.py /process.
+        contours = resample_contours(contours)
     stats["method"] = method
     stats["source"] = str(input_path)   # so score_tick can score against the source
 
@@ -80,7 +82,8 @@ def render(iter_num, method="march", levels=111, smooth=0.0, lum_mix=0.8,
     stats["segments"] = max(total_pts - stats.get("paths", 0), 0)
 
     export_contours = scale_contours(contours, processed_size, original_size)
-    svg = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range)
+    svg = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range,
+                                      stroke_scale=orig_w / img_w)
 
     base = out_dir / f"iter_{int(iter_num):03d}"
     svg_path, png_path, stats_path = (base.with_suffix(".svg"),

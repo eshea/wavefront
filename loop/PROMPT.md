@@ -29,24 +29,26 @@ The woman portrait (`woman-source.jpeg`) is the **canonical test**, baked into `
 VEX-LINE face, `ref_contourv_core`, Motoko, and the classical-woman lineart) with
 the Read tool — they are output-only (no matched inputs), pure visual targets.
 
-### WHAT YOU ARE TUNING NOW: the MARCH geodesic field (`engine/march.py`)
+### WHAT YOU ARE TUNING NOW: the MARCH fast-marching field (`engine/march.py`)
 The canonical render uses **`method=march`** (`render_tick.sh`): a 4-connected
-**geodesic** (skimage MCP) where each pixel's traversal cost rises with darkness
-and edges, so arrival-time contours BUNCH where the image is dark — **tone-driven
-density that actually renders the image's tones** — while 4-connectivity keeps the
-L1 **diamond** topology. This is what the additive wave field could NOT do (its
-density followed the seed geometry, not the image; `d_tone`≈0). Your knobs (all in
-`engine/march.py`, cost = `MARCH_BASE + MARCH_TONE·lum_mix·dark + MARCH_EDGE·edge`):
-- `MARCH_TONE` — THE tone-fidelity lever: darkness→extra cost→denser lines in
-  shadows. Higher raises `d_tone`. Too high → shadows go solid black (`d_ink` trips
-  the gate).
-- `MARCH_BASE` — diamond dominance / base step cost. LOW lets the image warp the
+**fast-marching arrival-time field** (skimage MCP) with a **reciprocal cost** —
+the confirmed CONTOUR-V model (see `docs/contour-v-core-source.md`). Speed is
+brightness clamped at a floor; cost = `MARCH_BASE + lum_mix·(1/speed − 1) +
+MARCH_EDGE·edge`. Isoline spacing = level spacing ÷ cost, so whites stay open,
+mids compress gently, and deep darks saturate to SOLID ink — **tone-driven
+density that actually renders the image's tones** — while 4-connectivity keeps
+the L1 **diamond** topology. Your knobs (in `engine/march.py`):
+- `MARCH_FLOOR` — THE tone lever: the speed floor. LOWER floor → darker darks
+  (denser shadow ink, raises `d_tone`/`d_fine`). Too low → shadows blow out
+  solid everywhere (`d_ink` trips the gate).
+- `MARCH_BASE` — diamond dominance / flat step cost. LOW lets the image warp the
   diamonds organically (`d_diag` lands in band); HIGH gives stiff diamonds (`d_diag`
   above band, penalised).
-- `MARCH_EDGE` — edges→extra cost: defines feature boundaries (eyes/nose/jaw).
+- `MARCH_EDGE` — edges→extra cost: extra feature-boundary definition. Usually
+  unnecessary — tonal pileup falls out of the reciprocal on its own.
 - `MARCH_CONTRAST` / `MARCH_GAMMA` — tonal pre-shaping of the gray (contrast about
   mid, then gamma) before the cost. `MARCH_BLUR` — denoise sigma.
-- render params: `lum_mix` (scales MARCH_TONE), `levels` (density; 111 = CORE's count).
+- render params: `lum_mix` (scales the tone term), `levels` (density; 111 = CORE's count).
 
 The LIVE value and bounds of every knob are in **`loop/STATUS.md`** (generated each
 tick from `engine/march_params.json` + `PARAM_BOUNDS`) — read it before tuning, and

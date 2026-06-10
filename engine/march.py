@@ -17,10 +17,20 @@ into bands. With a flat cost the field is exactly |dx|+|dy| (pure diamonds);
 MARCH_BASE controls how strongly the image is allowed to bend them.
 
 MCP works in COST (~1/speed) accumulated as arrival time, so SLOW = HIGH cost.
-Dark must mean DENSER lines, so dark/edges ADD cost:
+The cost mapping is RECIPROCAL — the confirmed CONTOUR-V model (the STUDIO
+screenshot's own subtitle is "Fast marching contour field"; see
+docs/contour-v-core-source.md). Speed is brightness clamped at a floor:
 
-    cost = MARCH_BASE + MARCH_TONE*lum_mix*dark + MARCH_EDGE*edge
-    T    = MCP(cost, 4-connected).find_costs(seed)      # arrival time (the field)
+    speed = clip(gray, MARCH_FLOOR, 1)                  # bright = fast
+    cost  = MARCH_BASE + lum_mix*(1/speed - 1) + MARCH_EDGE*edge
+    T     = MCP(cost, 4-connected).find_costs(seed)     # arrival time (the field)
+
+Why reciprocal (not the old linear MARCH_TONE*dark): isoline spacing = level
+spacing / cost, so 1/speed gives a gentle halftone through whites and midtones
+(white cost ~1, mid ~2) while deep darks blow up to 1/MARCH_FLOOR and saturate
+to solid ink — eyes/visors go black exactly like the artist outputs. A linear
+ramp can't do that: by the time darks saturate, mids are nearly as dense and
+whites are starved. MARCH_FLOOR is THE tone lever now (lower = darker darks).
 
 build_march_field returns the same (field, field_min, field_max) tuple as
 build_field / build_wave_field and feeds the identical isoline -> smooth -> SVG
@@ -45,20 +55,22 @@ from skimage.graph import MCP
 # version-controlled tuned config the optimizer writes (loop/optimize.py) and the
 # loop edits. PARAM_NAMES is the 6-vector the optimizer searches; PARAM_BOUNDS
 # the search/clamp box (NORM_LO/HI are fixed robustness knobs, not searched).
-MARCH_BASE = 0.4        # base per-step cost = diamond dominance. High => crisp
-                        # diamonds barely bent by the image; low => image dominates.
-                        # Tuned LOW so the image warps the diamonds organically
-                        # (d_diag~0.50, matching the artist) AND tone drives density.
-MARCH_TONE = 7.2        # darkness -> extra cost (× lum_mix). Higher => darks bunch
-                        # lines harder (denser shadows). This is the TONE-FIDELITY
-                        # lever — it's why march renders the image's tones (d_tone
-                        # ~0.74 on the canonical woman vs ~0 for the additive wave).
-MARCH_EDGE = 4.0        # edge magnitude -> extra cost. Higher => lines pile up and
-                        # deflect at feature boundaries (eyes/nose/jaw rim).
-MARCH_GAMMA = 1.0       # tone curve on gray: >1 darkens mids (more contour activity
-                        # in midtones), <1 lightens them.
-MARCH_CONTRAST = 2.0    # tonal contrast about mid-grey (sharper tonal separation).
-MARCH_BLUR = 2.0        # Gaussian denoise sigma on luminance (tames busy texture).
+MARCH_BASE = 1.0        # flat per-step cost = diamond dominance. High => crisp
+                        # diamonds barely bent by the image; low => the reciprocal
+                        # tone term dominates relatively (image warps the diamonds).
+                        # 1.0 = white regions march at unit speed (CONTOUR-V's scale).
+MARCH_FLOOR = 0.07      # speed floor: gray is clamped to [FLOOR, 1] before the
+                        # reciprocal, so deep darks cost up to 1/FLOOR per step.
+                        # THE tone lever — LOWER floor => darker darks (solid ink in
+                        # eyes/visors); higher floor => gentler, sparser shadows.
+MARCH_EDGE = 0.0        # edge magnitude -> extra cost. The reciprocal mapping makes
+                        # lines pile up at tonal boundaries on its own; this knob adds
+                        # extra deflection only if feature definition needs it.
+MARCH_GAMMA = 1.0       # tone curve on speed: >1 darkens mids (denser midtones),
+                        # <1 lightens them.
+MARCH_CONTRAST = 1.0    # tonal contrast about mid-grey (sharper tonal separation).
+MARCH_BLUR = 1.2        # Gaussian denoise sigma on luminance (tames busy texture;
+                        # also sets how wide edge pileups smear).
 MARCH_NORM_LO = 2.0     # low percentile for tone normalization (robust black point).
 MARCH_NORM_HI = 98.0    # high percentile (robust white point) — avoids one blown
                         # highlight/shadow dominating the whole tonal range.
@@ -67,10 +79,10 @@ MARCH_NORM_HI = 98.0    # high percentile (robust white point) — avoids one bl
 # ── externalized parameter surface (config + optimizer) ──────────────────
 # The 6 aesthetic knobs the optimizer searches, with (lo, hi) search/clamp bounds.
 PARAM_BOUNDS = {
-    "MARCH_BASE":     (0.2, 1.2),    # diamond dominance (low=image-warped, high=stiff)
-    "MARCH_TONE":     (2.0, 12.0),   # darkness→density (THE tone lever)
-    "MARCH_EDGE":     (0.0, 8.0),    # edge→density (feature definition)
-    "MARCH_GAMMA":    (0.6, 2.0),    # midtone curve
+    "MARCH_BASE":     (0.4, 2.0),    # diamond dominance (low=image-warped, high=stiff)
+    "MARCH_FLOOR":    (0.02, 0.35),  # speed floor (THE tone lever; lower=darker darks)
+    "MARCH_EDGE":     (0.0, 4.0),    # edge→density (extra feature definition)
+    "MARCH_GAMMA":    (0.5, 2.0),    # midtone curve on speed
     "MARCH_CONTRAST": (0.8, 3.0),    # tonal contrast about mid-grey
     "MARCH_BLUR":     (0.0, 5.0),    # denoise sigma
 }
@@ -115,7 +127,8 @@ def load_params(path=None):
 
 def _preprocess_gray(luminance):
     """Luminance (0..255) -> normalized gray in 0..1 after percentile-normalize,
-    blur, contrast and gamma. Returns (gray, dark, edge), all float32 in 0..1."""
+    blur, contrast and gamma. Returns (gray, edge), both float32 in 0..1.
+    gray is the wave's local SPEED source (bright = fast)."""
     lum = luminance.astype(np.float32)
     if MARCH_BLUR > 0:
         lum = gaussian_filter(lum, sigma=MARCH_BLUR)
@@ -130,8 +143,6 @@ def _preprocess_gray(luminance):
     gray = np.clip((gray - 0.5) * MARCH_CONTRAST + 0.5, 0.0, 1.0)
     gray = np.power(gray, MARCH_GAMMA)
 
-    dark = 1.0 - gray
-
     # Edge magnitude from the gradient of the (already blurred) gray — same idiom
     # as engine/flow.py's tangent field. Normalize to 0..1.
     gy, gx = np.gradient(gray)
@@ -140,7 +151,7 @@ def _preprocess_gray(luminance):
     if emax > 1e-6:
         edge = edge / emax
 
-    return gray.astype(np.float32), dark.astype(np.float32), edge.astype(np.float32)
+    return gray.astype(np.float32), edge.astype(np.float32)
 
 
 def build_march_field(luminance, seed_x, seed_y, lum_mix=1.0):
@@ -157,11 +168,16 @@ def build_march_field(luminance, seed_x, seed_y, lum_mix=1.0):
         field_max: float
     """
     H, W = luminance.shape
-    _, dark, edge = _preprocess_gray(luminance)
+    gray, edge = _preprocess_gray(luminance)
 
-    # Per-step cost (~1/speed). Strictly positive so MCP has a well-defined geodesic.
+    # Per-step cost = 1/speed, the confirmed CONTOUR-V mapping: bright marches at
+    # ~unit cost, deep darks cost up to 1/MARCH_FLOOR (lines bunch to solid ink).
+    # lum_mix scales the tone term (0 = flat cost = pure diamonds), matching its
+    # semantics in the other methods. Strictly positive, so MCP's geodesic is
+    # well-defined.
+    speed = np.clip(gray, MARCH_FLOOR, 1.0)
     cost = (MARCH_BASE
-            + MARCH_TONE * float(lum_mix) * dark
+            + float(lum_mix) * (1.0 / speed - 1.0)
             + MARCH_EDGE * edge).astype(np.float64)
 
     sy = int(np.clip(seed_y, 0, H - 1))
