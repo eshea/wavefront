@@ -8,7 +8,7 @@ from PIL import Image
 
 from app import app
 from engine.contour import scale_contours
-from engine.field import load_and_preprocess
+from engine.field import MAX_DIM, load_and_preprocess
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,7 +22,7 @@ def image_bytes(size=(32, 24), color=(128, 96, 64), fmt='PNG'):
     return buf
 
 
-def expected_processed_size(size, max_dim=640):
+def expected_processed_size(size, max_dim=MAX_DIM):  # track the live engine cap, not a frozen 640
     w, h = size
     if max(w, h) <= max_dim:
         return size

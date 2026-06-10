@@ -132,7 +132,7 @@ while true; do
   printf '[ralph] iter %s done · in=%s out=%s cache_read=%s · cum_in=%s cum_out=%s\n' \
     "$iter_pad" "$in_tok" "$out_tok" "$cache_read" "$total_in" "$total_out"
 
-  # Auto-score the tick's output (pixel metrics + visual judge).
+  # Auto-score the tick's output (deterministic dscore + pixel co-signals).
   # Best effort — failures don't stop the loop.
   ./loop/score_tick.sh "$ITER" 2>/dev/null || true
 
@@ -151,12 +151,12 @@ cur = next((r for r in reversed(rows) if r.get("iter") == it), {})
 verdict = "REVERTED" if "FAIL" in os.environ.get("GUARD_OUT", "") else \
           ("KEPT" if "PASS" in os.environ.get("GUARD_OUT", "") else "?")
 with open("loop/EXPERIMENT_LOG.md", "a") as f:
-    f.write(f"- result: judge={cur.get('judge_score','?')} "
-            f"gap={cur.get('judge_gap','')!r} -> {verdict}\n")
+    f.write(f"- result: d_score={cur.get('d_score','?')} "
+            f"fid={cur.get('d_fidelity','?')} style={cur.get('d_style','?')} -> {verdict}\n")
 PY
   fi
 
-  # Periodic holdout overfit-check (renders + judges an unseen image).
+  # Periodic holdout overfit-check (renders + scores an unseen image).
   if [ "$HOLDOUT_EVERY" -gt 0 ] && [ $((ITER % HOLDOUT_EVERY)) -eq 0 ]; then
     printf '[ralph] holdout overfit-check at iter %s\n' "$iter_pad"
     ./loop/tests/holdout.sh || true

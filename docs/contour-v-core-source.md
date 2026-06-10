@@ -13,6 +13,7 @@ slider/HUD reverse-engineering see `vex-engine-reverse-engineering.md`.
 | Ko-fi product page | Official product listing + feature copy | https://ko-fi.com/s/bab05e779e |
 | YouTube demo | "Contour-V CORE : Image to SVG Product Demo" by Robert T Wilson (@RTWilsonStudios) | https://www.youtube.com/watch?v=uduMa-syiDs |
 | Reddit (r/ClaudeAI) | Artist post: "Fixed a nasty JS loop issue in my contour app with Claude's help" | post id `t3_1snzkr6` |
+| STUDIO UI screenshot | First-party CONTOUR-V **STUDIO** screenshot (full control panel + algorithm subtitle) | `examples/ui-screenshot.jpeg` |
 
 Local archived copies of the Ko-fi page and the Reddit thread live in
 `~/Downloads/` (saved HTML + assets). The tool's own source is **not** in those
@@ -73,6 +74,43 @@ Takeaways for WAVEFRONT:
   density. Even line spacing and clean white space beat raw line count.
 - The reference outputs were produced by the *fixed* version, so any duplicate /
   doubled contour artifact on our side is a regression, not a stylistic match.
+
+## The STUDIO screenshot decode (2026-06-09) — first-party algorithm confirmation
+
+`examples/ui-screenshot.jpeg` was long assumed to be a screenshot of *our* app; it
+is actually a first-party **CONTOUR-V STUDIO** screenshot ("VEX ENGINE | STUDIO
+MODULE"), and it settles the algorithm question:
+
+- The panel subtitle reads "**Fast marching contour field → plot-ready SVG**",
+  there is a **SPEED** view toggle (renders the speed map), and a PROCESS toggle
+  "**INVERT (DARK = FAST) ← PORTRAITS**". So the field IS a front-propagation /
+  arrival-time field whose local speed comes from image brightness, with
+  dark = slow as the default. This confirms WAVEFRONT's `method=march` family
+  (4-neighbor propagation = L1 diamonds, visible in every reference output).
+- The cost mapping is **reciprocal** (`cost = 1/speed`, speed ∝ luminance clamped
+  at a floor), not linear-in-darkness. Since isoline spacing = level spacing ÷
+  cost, the reciprocal shape yields a gentle halftone through whites/mids and
+  lets deep darks saturate to solid ink (the eyes/visor going black). T RANGE
+  values in both captured HUDs (max ≈ 1.8 × the max L1 seed distance) corroborate
+  it, and a prototype with this exact mapping near-matched the woman / space /
+  samurai reference outputs on the first try.
+- The full STUDIO control surface, which doubles as the downstream-pipeline spec
+  (captured values from the screenshot): GRID RES 600 px · CONTRAST 1.00 ·
+  GAMMA 1.00 · SMOOTH (passes) · LOOK PRESET "Balanced Portrait" · CONTOURS 149 ·
+  **T-MAX % 99.50** (clips the top of the field range) · **SPACING Linear** ·
+  **STROKE 0.70** (constant px) · **STROKE MOD off** (weight modulation is
+  opt-in) · BEZIER off · MIN SEG 0.00 px · CHAIN GAP 0.60 px · SIMPLIFY 0.00 px ·
+  **STEP 3.00 px** (polyline resample — the "clean controlled" line quality) ·
+  **MIN PTS 4** (keep tiny closed loops — they make dark features render solid) ·
+  MULTI-SEED MODE · CHAIN SEGMENTS → POLYLINES · FILTER SHORT SEGMENTS ·
+  TSP-ORDER CONTOUR CHAINS WITHIN EACH LEVEL · 2-OPT off.
+- Stats HUD in that capture: PATHS 493 · LEVELS ~139 · GRID 600×343 ·
+  T RANGE 0.0…1030.5. The CORE captures (`contour_woman_settings.webp`,
+  `contour-v-app-ui-screenshot.jpeg`): PATHS 652 · POINTS 135,962 · LEVELS 111 ·
+  SEGS 152,819 · GRID 438×640 · T RANGE 0.0…1173.9.
+
+See `vex-engine-reverse-engineering.md` for the working analysis (spacing math,
+T-range numerology, prototype scores).
 
 ## CORE's exposed surface (what we must match) vs. what it hides
 

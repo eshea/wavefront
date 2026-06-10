@@ -23,9 +23,12 @@ The reference outputs in `examples/` define the target. Concretely:
   intact and bend — not break into loops — around eyes/nose/mouth.
 - **Even line spacing and clean white space**, consistent from the seed to the
   image edges. No artificial circular "zone."
-- **Dense where it should be, but controlled** — never a smudgy blob in shadow
-  regions (the artist's own stated failure mode; see `contour-v-core-source.md`).
-- **Plotter-ready SVG** sized to the original image, with adaptive stroke weight.
+- **Dense where it should be, but controlled** — deep darks saturate to solid
+  ink (eyes, visors) while midtones stay a gentle halftone; never a smudgy blob
+  across whole shadow regions (the artist's own stated failure mode; see
+  `contour-v-core-source.md`).
+- **Plotter-ready SVG** sized to the original image — constant ink stroke by
+  default (a plotter has one pen), adaptive stroke weight opt-in.
 
 ## Scope: CORE parity, then STUDIO
 
@@ -41,7 +44,9 @@ The reference outputs in `examples/` define the target. Concretely:
 
 ## How we get there
 
-A reverse-engineered L1-diamond ("wave") distance+luminance field (`algorithm.md`), driven
-toward the reference by the **ralph loop** (`loop/`): an autonomous
-iterate-render-score-document cycle that tunes one engine knob at a time against
-the `examples/` targets, with a held-out set to guard against overfitting.
+A reverse-engineered fast-marching contour field — CONTOUR-V's own confirmed
+model: a 4-connected arrival-time field with reciprocal brightness cost
+(`algorithm.md`) — driven toward the reference by the **ralph loop** (`loop/`):
+an autonomous iterate-render-score-document cycle that tunes one engine knob at
+a time against the `examples/` targets, with a held-out set to guard against
+overfitting.

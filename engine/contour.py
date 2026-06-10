@@ -9,10 +9,21 @@ import numpy as np
 from skimage import measure
 
 
-# Level-spacing exponent (ralph loop tunes this). 1.0 = LINEAR = even spacing,
-# which matches the reference's near-uniform line density. The old 2.7
+# Level-spacing exponent (ralph loop tunes this). 1.0 = LINEAR = even spacing —
+# confirmed: CONTOUR-V STUDIO's SPACING control reads "Linear". The old 2.7
 # concentrated ~77% of levels near the seed, over-densifying the face.
-THRESHOLD_POWER = 1.3
+THRESHOLD_POWER = 1.0
+
+# Keep tiny closed loops: CONTOUR-V STUDIO filters at MIN PTS 4. The previous 30
+# silently dropped the small concentric loops around dark features (eyes, brows),
+# which are exactly what makes darks render as solid ink (652 paths in the CORE
+# reference capture vs 267 in ours before this change).
+MIN_PATH_POINTS = 4
+
+# Clip the top of the field range before spacing levels (CONTOUR-V STUDIO
+# "T-MAX %", default 99.50): the farthest fraction of arrival times is outlier
+# tail (slow corners), and spending levels there starves the subject.
+TMAX_CLIP_PCT = 99.5
 
 
 def compute_thresholds(field_min, field_max, n_levels):
@@ -57,6 +68,8 @@ def extract_contours(field, n_levels, field_min=None, field_max=None):
     """
     fmin = field_min if field_min is not None else float(field.min())
     fmax = field_max if field_max is not None else float(field.max())
+    if TMAX_CLIP_PCT < 100.0:
+        fmax = min(fmax, float(np.percentile(field, TMAX_CLIP_PCT)))
 
     thresholds = compute_thresholds(fmin, fmax, n_levels)
     field_range = fmax - fmin if fmax != fmin else 1.0
@@ -67,7 +80,7 @@ def extract_contours(field, n_levels, field_min=None, field_max=None):
     for t in thresholds:
         paths = measure.find_contours(field, level=t)
         for path in paths:
-            if len(path) < 30:
+            if len(path) < MIN_PATH_POINTS:
                 continue
             normalized = (t - fmin) / field_range
             all_contours.append({

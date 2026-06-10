@@ -19,7 +19,7 @@ Usage:
     python loop/render.py <iter_number> [--method wave] [--levels 90]
                           [--smooth 0.0] [--lum-mix 0.8] [--wt-range 0.0]
                           [--seed-x N --seed-y N] [--input PATH]
-                          [--png-width 434] [--out-dir loop/output]
+                          [--png-width 780] [--out-dir loop/output]
 
 Defaults match loop/render_tick.sh's canonical settings. Seed defaults to the
 processing-grid center (same as app.py when no seed is provided).
@@ -36,17 +36,18 @@ sys.path.insert(0, str(REPO))
 from engine.field import (load_and_preprocess, to_luminance, build_field,  # noqa: E402
                           build_wave_field)
 from engine.contour import extract_contours, scale_contours  # noqa: E402
-from engine.smooth import smooth_contours  # noqa: E402
+from engine.smooth import resample_contours, smooth_contours  # noqa: E402
 from engine.export import contours_to_svg_string_fast  # noqa: E402
 from engine.flow import trace_flow_lines  # noqa: E402
+from engine.march import build_march_field  # noqa: E402
 
-METHODS = ("contour", "wave", "flow")
+METHODS = ("contour", "wave", "flow", "march")
 
 
-def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
+def render(iter_num, method="march", levels=111, smooth=0.0, lum_mix=0.8,
            wt_range=0.0, seed_x=None, seed_y=None,
-           input_path=REPO / "examples" / "contour_woman.webp",
-           png_width=434, out_dir=REPO / "loop" / "output"):
+           input_path=REPO / "examples" / "woman" / "woman-source.jpeg",
+           png_width=780, out_dir=REPO / "loop" / "output"):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     method = method if method in METHODS else "contour"
@@ -65,10 +66,15 @@ def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
     else:
         if method == "wave":
             field, f_min, f_max = build_wave_field(luminance, sx, sy, lum_mix)
+        elif method == "march":
+            field, f_min, f_max = build_march_field(luminance, sx, sy, lum_mix)
         else:
             field, f_min, f_max = build_field(luminance, sx, sy, lum_mix)
         contours, stats = extract_contours(field, levels, f_min, f_max)
+        # Fixed-step resample (STUDIO "STEP") — same placement as app.py /process.
+        contours = resample_contours(contours)
     stats["method"] = method
+    stats["source"] = str(input_path)   # so score_tick can score against the source
 
     contours = smooth_contours(contours, smooth)
     total_pts = sum(len(c["points"]) for c in contours)
@@ -76,7 +82,8 @@ def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
     stats["segments"] = max(total_pts - stats.get("paths", 0), 0)
 
     export_contours = scale_contours(contours, processed_size, original_size)
-    svg = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range)
+    svg = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range,
+                                      stroke_scale=orig_w / img_w)
 
     base = out_dir / f"iter_{int(iter_num):03d}"
     svg_path, png_path, stats_path = (base.with_suffix(".svg"),
@@ -92,15 +99,16 @@ def render(iter_num, method="wave", levels=90, smooth=0.0, lum_mix=0.8,
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("iter", help="iteration number (used to name artifacts)")
-    p.add_argument("--method", default="wave", choices=METHODS)
-    p.add_argument("--levels", type=int, default=90)
+    p.add_argument("--method", default="march", choices=METHODS)
+    p.add_argument("--levels", type=int, default=111)
     p.add_argument("--smooth", type=float, default=0.0)
     p.add_argument("--lum-mix", type=float, default=0.8)
     p.add_argument("--wt-range", type=float, default=0.0)
     p.add_argument("--seed-x", type=int, default=None)
     p.add_argument("--seed-y", type=int, default=None)
-    p.add_argument("--input", type=Path, default=REPO / "examples" / "contour_woman.webp")
-    p.add_argument("--png-width", type=int, default=434)
+    p.add_argument("--input", type=Path,
+                   default=REPO / "examples" / "woman" / "woman-source.jpeg")
+    p.add_argument("--png-width", type=int, default=780)
     p.add_argument("--out-dir", type=Path, default=REPO / "loop" / "output")
     a = p.parse_args()
 

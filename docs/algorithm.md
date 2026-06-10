@@ -1,12 +1,21 @@
 # WAVEFRONT Algorithm Documentation
 
-This documents the **active `method=wave` path** (`engine.field.build_wave_field`),
-the L1-diamond field WAVEFRONT now uses to replicate CONTOUR-V CORE. See
-`contour-v-core-source.md` for the replication target. The shared pipeline
-(preprocess → extract → smooth → scale → export) is the same for every method;
-only field construction (Step 3) differs. `method=contour` (`build_field`, the
-simpler uniform formula) and `method=flow` (`engine.flow`) are **parked
-baselines/experiments** — summarized at the end, not the canonical path.
+The **active path is now `method=march`** (`engine.march.build_march_field`): a
+4-connected **fast-marching arrival-time field** with a **reciprocal** cost —
+`speed = clip(gray, MARCH_FLOOR, 1)`, `cost = MARCH_BASE + lum_mix·(1/speed − 1)
++ MARCH_EDGE·edge` — the confirmed CONTOUR-V model (the STUDIO screenshot's own
+subtitle is "Fast marching contour field"; see `contour-v-core-source.md`).
+Since isoline spacing = level spacing ÷ cost, the reciprocal shape gives a
+gentle halftone through whites and midtones while deep darks saturate to solid
+ink — **tone-driven density that renders the image's tones** — and
+4-connectivity keeps the L1 **diamond** topology. This replaced first the
+additive `method=wave` field (Steps 2–3 below, now a **parked baseline**, which
+could only make density seed-centric: `d_tone`≈0) and then the linear
+`MARCH_TONE·dark` cost (which starved whites and muddied mids by the time darks
+saturated). The shared pipeline (preprocess → extract → resample → smooth →
+scale → export) is the same for every method; only field construction differs.
+`method=wave/contour/flow` are parked baselines — documented below and at the
+end, not the canonical path.
 
 > **History note.** Earlier versions used an *adaptive / zoned* luminance blur
 > that imposed a circular "ring" at ~20–35% radius, plus a steep
@@ -18,7 +27,7 @@ baselines/experiments** — summarized at the end, not the canonical path.
 
   Image -> processing resize + original size retained -> luminance
   -> uniform preprocessing (denoise + shadow-lift) -> scalar field
-  -> Marching Squares paths -> Chaikin smoothing
+  -> Marching Squares paths -> fixed-step resample -> Chaikin smoothing
   -> original-size coordinate scaling -> SVG
 
 ## Step 1: Image Preprocessing
@@ -35,6 +44,16 @@ baselines/experiments** — summarized at the end, not the canonical path.
   3. Convert the processing copy to luminance:
      L[y,x] = 0.299 * R + 0.587 * G + 0.114 * B
      (ITU-R BT.601 standard)
+
+  4. Tonal pre-shaping (`shape_tone`, CONTOUR-V STUDIO "Input & Tonal Control").
+     Applied to luminance before the field, so it shapes WHICH tones get contour
+     density. Identity at defaults (existing renders unchanged). Constants in
+     `engine/field.py`, applied to `wave` and `contour`:
+
+       L = contrast_about_mid(L, TONE_CONTRAST)   # >1 sharper light/dark
+       L = L ** TONE_GAMMA                         # <1 lifts shadows (de-clumps
+                                                   #   over-dense dark regions)
+       if TONE_INVERT >= 0.5: L = 255 - L          # dark-first (portraits)
 
 ## Step 2: Adaptive Luminance Blur (zoned by seed distance)
 
@@ -86,24 +105,39 @@ baselines/experiments** — summarized at the end, not the canonical path.
 
 ## Step 4: Isoline Extraction
 
-  For N levels, compute power-spaced thresholds (`THRESHOLD_POWER` in
-  `engine/contour.py`, currently ~1.3; the ralph loop tunes it):
+  The field range is first clipped at the top (`TMAX_CLIP_PCT` in
+  `engine/contour.py`, 99.5 — CONTOUR-V STUDIO's "T-MAX %"): the farthest
+  fraction of arrival times is outlier tail and spending levels there starves
+  the subject. Then, for N levels, compute power-spaced thresholds
+  (`THRESHOLD_POWER`, currently 1.0 = linear; the ralph loop tunes it):
 
     frac[i] = i / (N + 1), for i in 1..N
     threshold[i] = field_min + frac[i]^THRESHOLD_POWER * (field_max - field_min)
 
-  THRESHOLD_POWER = 1.0 is linear = even line spacing, which matches the
-  reference's near-uniform density. Values >1 concentrate levels near the seed
+  THRESHOLD_POWER = 1.0 is linear = even line spacing — confirmed by STUDIO's
+  SPACING control reading "Linear". Values >1 concentrate levels near the seed
   (denser face). The old 2.7 put ~77% of levels near the seed and over-densified
-  the face — it was tuned down toward linear to match the target.
+  the face.
 
   Each threshold is passed to:
 
     skimage.measure.find_contours(field, level=threshold)
 
   `find_contours` implements Marching Squares and already returns connected
-  polylines. WAVEFRONT filters out very short paths (`len(path) < 30`) but does
-  not run a custom chain-linking pass.
+  polylines. Very short paths (`len(path) < MIN_PATH_POINTS`, 4 — STUDIO's
+  "MIN PTS 4") are dropped; no custom chain-linking pass. Keeping tiny closed
+  loops matters: they are the concentric "dots" piled around small dark features
+  (eyes, brows) that make darks render as solid ink — the old filter of 30
+  silently deleted them.
+
+## Step 4b: Fixed-Step Resampling (STUDIO "STEP")
+
+  Raw Marching Squares emits a point roughly every grid pixel; that sub-pixel
+  stairstep noise is what made unsmoothed output look jittery. Each path is
+  re-walked at a uniform arclength step (`RESAMPLE_STEP` in `engine/smooth.py`,
+  3.0 px — STUDIO shows STEP 3.00 px) before smoothing: micro-noise straightens
+  out, real corners stay, point count drops ~70%. Endpoints are preserved
+  exactly (closed paths stay closed; tiny closed loops keep ≥4 samples).
 
 ## Step 5: Chaikin Smoothing
 
@@ -121,20 +155,21 @@ baselines/experiments** — summarized at the end, not the canonical path.
 
   `smooth` is clamped to 0-1 by the Flask API and UI.
 
-## Step 6: Adaptive Stroke Weight
+## Step 6: Stroke (constant ink by default; modulation opt-in)
 
-  Lines closer to low field values are drawn thicker and darker.
+  Default (`wt_range = 0`): every path is drawn at a CONSTANT `STROKE_WIDTH`
+  (0.75 px on the processing grid, scaled by original/grid so the exported SVG
+  keeps the same visual weight) at FULL opacity — plotter ink, matching
+  CONTOUR-V (STUDIO: STROKE 0.70, STROKE MOD off; a plotter has one pen). The
+  old unconditional opacity fade (0.95 → 0.35 with field value) was a
+  divergence that made everything far from the seed wash out gray.
+
+  `wt_range > 0` opts into modulation (the STROKE MOD equivalent):
 
     normalized_t = (threshold - field_min) / (field_max - field_min)
 
     stroke_width = max(0.2,  1.4 - normalized_t * wt_range * 1.2)
-    stroke_alpha = max(0.35, 0.95 - normalized_t * 0.4)
-
-  This gives:
-  - Near seed: width about 1.4px, alpha about 0.95
-  - Far field: width down to 0.2px, alpha down to 0.35
-  - wt_range=0: flat 1.4px width
-  - wt_range=1: full width variation
+    stroke_alpha = max(0.35, 0.95 - normalized_t * 0.4 * wt_range)
 
   `wt_range` is clamped to 0-1 by the Flask API and UI.
 
@@ -157,13 +192,55 @@ baselines/experiments** — summarized at the end, not the canonical path.
 
 | Parameter | Range | Default | Notes |
 |-----------|-------|---------|-------|
-| levels | 10-150 | 63 | Number of power-spaced threshold levels. |
-| smooth | 0-1 | 0.70 | Mapped to 0-4 Chaikin iterations. |
-| lum_mix | 0-2 | 1.0 | Strength of luminance warping. |
-| wt_range | 0-1 | 0.6 | Stroke width variation. |
+| levels | 10-150 | 111 | Number of power-spaced threshold levels. |
+| smooth | 0-1 | 0.00 | Mapped to 0-4 Chaikin iterations. |
+| lum_mix | 0-2 | 0.8 | Strength of luminance warping. |
+| wt_range | 0-1 | 0.0 | Stroke width variation. |
 | seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid. |
-| method | contour/wave/flow | contour | API default; the **ralph loop renders `wave`**. |
+| method | contour/wave/flow/march | march | API + UI default — the canonical "woman output" (fast-marching reciprocal cost), matching `render_tick.sh`. |
 | diamond | 0-1 | 0.0 | `wave` only — maps to `WAVE_DIAMOND` if sent. |
+
+## The active field: method=march (fast marching, reciprocal cost)
+
+`method=march` (`engine/march.py:build_march_field`) is the canonical field — it
+shares Steps 1, 4–7 and only swaps Step 3. It is CONTOUR-V's confirmed model
+(see `contour-v-core-source.md`, "STUDIO screenshot decode"): a seed emits a
+wavefront whose local SPEED is set by the image, and the plotted lines are
+equal-arrival-time fronts.
+
+It is a **4-connected weighted distance** (`skimage.graph.MCP`,
+`fully_connected=False`), whose geodesic is L1 (Manhattan) → concentric DIAMONDS.
+MCP accumulates COST = 1/speed, with speed = brightness clamped at a floor:
+
+    gray  = percentile_normalize -> blur -> contrast -> gamma  (engine/march.py)
+    edge  = normalized |grad(gray)|
+    speed = clip(gray, MARCH_FLOOR, 1)                         # bright = fast
+    cost  = MARCH_BASE + lum_mix*(1/speed - 1) + MARCH_EDGE*edge
+    field = MCP(cost, 4-connected).find_costs(seed)            # arrival time
+    contours = extract_contours(field, levels)                 # same downstream
+
+Why the RECIPROCAL shape matters: isoline spacing = level spacing / cost, so
+whites march at ~unit cost (even, open spacing), midtones compress gently
+(~2×), and deep darks cost up to 1/MARCH_FLOOR — lines bunch until they merge
+into solid ink ("the visor goes black"). A linear darkness ramp (the previous
+`MARCH_TONE·dark` cost) can't produce that response: by the time darks
+saturated, midtones were nearly as dense and whites were starved.
+
+`MARCH_FLOOR` is THE tone lever (lower floor ⇒ darker darks). `MARCH_BASE` is
+the diamond-dominance knob: high ⇒ crisp diamonds barely bent by the image;
+low ⇒ the tone term dominates relatively. Other knobs: `MARCH_EDGE` (extra edge
+deflection — usually unnecessary, tonal pileup falls out of the reciprocal),
+`MARCH_GAMMA`/`MARCH_CONTRAST`/`MARCH_BLUR` (tone preprocessing),
+`MARCH_NORM_LO/HI` (percentile normalize). The 6 aesthetic knobs are
+**externalized** to `engine/march_params.json` (loaded at import, overrides the
+in-code defaults) — the tuned config the optimizer (`loop/optimize.py`)
+writes and the loop edits; `engine.march.PARAM_BOUNDS` is the search/clamp box, also
+the source of the web UI's STUDIO slider ranges.
+
+**Why 4-connectivity (not a true eikonal):** an isotropic fast-marching eikonal
+(scikit-fmm) was tried earlier and abandoned — its round fronts globally rerouted
+into horizontal bands. The 4-connected L1 topology is constrained: tone/edges bend
+and bunch the diamonds locally but cannot reroute them into bands.
 
 ## Parked baselines (not the active path)
 

@@ -17,30 +17,52 @@ These are what "good" looks like. You are matching these.
 
 | Input (pre) | Reference target | Known settings |
 |---|---|---|
-| `examples/contour_woman.webp` | `examples/contour_woman_lineart.png` (clean diamond line-art; also `contour_woman_post*`) | centered seed, levels 65, method=wave |
+| `examples/woman/woman-source.jpeg` (**canonical**) | `examples/woman/woman-sample-output-2.jpeg` — the artist's dense CONTOUR-V output for that input (the "really good" target; see also the low/med/high `woman-sample-output-density-example.jpeg`). The scorer compares your render to the SOURCE. | centered seed, levels 111, method=march |
+| `examples/space/space-source.jpg` (helmet) | `examples/space/space-output-1.jpeg` — flowing-wave matched pair. Now the **holdout** (generalization check). | — |
+| `examples/samurai/samurai-source.jpg` | `examples/samurai/samurai-output-1.jpeg` — flowing matched pair (busy source). | — |
 
-The woman is the **canonical test**, baked into `loop/render_tick.sh` +
-`loop/score_tick.sh`. Also study the new style references in `examples/`
-(the blue VEX-LINE face, `Screenshot ... CONTOUR-V CORE`, Motoko) with
-the Read tool — they are output-only (no inputs), pure visual targets.
+NOTE: the OLD `contour_woman_*` files (`.webp`/`lineart`/`post*`) are a DIFFERENT,
+unmatched subject — ignore them. The matched woman pair is in `examples/woman/`.
 
-### WHAT YOU ARE TUNING NOW: the WAVE / L1-diamond field (`build_wave_field`)
-The canonical render uses **`method=wave`** (`render_tick.sh`): an L1 (Manhattan)
-distance base that dominates the gradient — giving crisp concentric **diamonds**
-that stay topologically intact everywhere — plus a GENTLE luminance relief so the
-diamonds ripple around eyes/nose/mouth without breaking into closed loops. The
-relief is suppressed far from the seed so hair/background render as clean
-diamonds, not dense texture. Aim for EVEN line spacing and generous white space.
-Your knobs (all in `engine/field.py` unless noted):
-- `WAVE_DIAMOND` — 0 = full ripple, 1 = ignore the face (pure crisp diamonds).
-- `WAVE_RELIEF` — luminance ripple amplitude; low => diamonds dominate.
-- `WAVE_SIGMA_FACE` / `WAVE_SIGMA_BG` — luminance blur near / far from the seed.
-- `WAVE_FAR` — far-field ripple multiplier; low => clean background diamonds.
-- `WAVE_INNER` / `WAVE_OUTER` — face vs background zone radii (fraction of min(W,H)).
-- `engine/contour.py`: `THRESHOLD_POWER` (1.0 = linear/even spacing; >1 densifies).
-- render params: `lum_mix` (scales the relief), `levels`.
-Tune ONE per tick. `method=contour` (`build_field`) and `method=flow` are parked
-experiments; leave them and their constants (FIELD_*) alone.
+The woman portrait (`woman-source.jpeg`) is the **canonical test**, baked into `loop/render_tick.sh` +
+`loop/score_tick.sh`. Also study the style references in `examples/` (the blue
+VEX-LINE face, `ref_contourv_core`, Motoko, and the classical-woman lineart) with
+the Read tool — they are output-only (no matched inputs), pure visual targets.
+
+### WHAT YOU ARE TUNING NOW: the MARCH fast-marching field (`engine/march.py`)
+The canonical render uses **`method=march`** (`render_tick.sh`): a 4-connected
+**fast-marching arrival-time field** (skimage MCP) with a **reciprocal cost** —
+the confirmed CONTOUR-V model (see `docs/contour-v-core-source.md`). Speed is
+brightness clamped at a floor; cost = `MARCH_BASE + lum_mix·(1/speed − 1) +
+MARCH_EDGE·edge`. Isoline spacing = level spacing ÷ cost, so whites stay open,
+mids compress gently, and deep darks saturate to SOLID ink — **tone-driven
+density that actually renders the image's tones** — while 4-connectivity keeps
+the L1 **diamond** topology. Your knobs (in `engine/march.py`):
+- `MARCH_FLOOR` — THE tone lever: the speed floor. LOWER floor → darker darks
+  (denser shadow ink, raises `d_tone`/`d_fine`). Too low → shadows blow out
+  solid everywhere (`d_ink` trips the gate).
+- `MARCH_BASE` — diamond dominance / flat step cost. LOW lets the image warp the
+  diamonds organically (`d_diag` lands in band); HIGH gives stiff diamonds (`d_diag`
+  above band, penalised).
+- `MARCH_EDGE` — edges→extra cost: extra feature-boundary definition. Usually
+  unnecessary — tonal pileup falls out of the reciprocal on its own.
+- `MARCH_CONTRAST` / `MARCH_GAMMA` — tonal pre-shaping of the gray (contrast about
+  mid, then gamma) before the cost. `MARCH_BLUR` — denoise sigma.
+- render params: `lum_mix` (scales the tone term), `levels` (density; 111 = CORE's count).
+
+The LIVE value and bounds of every knob are in **`loop/STATUS.md`** (generated each
+tick from `engine/march_params.json` + `PARAM_BOUNDS`) — read it before tuning, and
+move FROM the value shown there. This file gives directions, never frozen numbers.
+Tune ONE per tick (see `loop/IDEAS.md` menu). `method=wave/flow/contour` and their
+WAVE_*/FLOW_*/FIELD_* constants are PARKED — they don't affect the march render.
+
+**WHERE THE KNOBS LIVE NOW:** the 6 `MARCH_*` values are externalized to
+`engine/march_params.json` (loaded at import, OVERRIDES the in-code defaults). Edit
+**that JSON** to tune one per tick — editing the `march.py` constants is shadowed by
+the JSON. For a broad sweep instead of one-knob-per-tick, run the constrained
+multi-input optimizer: `python loop/optimize.py --evals 100 --polish` (maximizes
+woman `d_fine` while keeping samurai+space valid; writes the JSON winner). Use the
+ralph loop for breadth (new fields/methods/metrics), the optimizer to exploit knobs.
 
 **HOLDOUT — DO NOT TOUCH:** `loop/holdout/contour_space_pre.jpg` and
 `loop/holdout/contour_space_post.webp` are the held-out test set. Do
@@ -48,39 +70,86 @@ not read from `loop/holdout/`. Do not score against it. Do not use it
 for any inspiration. The harness will run it separately when humans
 want to check for overfitting.
 
+**SCORER FIXTURES — ALSO DO NOT TOUCH:** `loop/tests/fixtures/` holds the
+hard-negative corpus that gates the scorer (`dscore_calib.sh`). Do not read,
+score against, or take inspiration from it — these are deliberately-bad renders
+whose only job is to keep the scorer honest. Tuning toward them would defeat the
+gate. They are regenerated only by a human via `make_hard_negatives.py`.
+
 ## QUANTITATIVE SIGNAL (read before deciding)
 
 After each tick, `loop/score_tick.sh` runs automatically and appends
-one JSON line to `loop/metrics.jsonl` with three numbers per output:
+one JSON line to `loop/metrics.jsonl`. The metric is **fully deterministic**
+(`loop/dscore.py`) — no LLM, no backend, reproducible run to run:
 
-- `judge_score` (0–100, **primary metric**) — a single DETERMINISTIC temp-0
-  read from a local vision model (`judge.py`). The score is computed from a
-  yes/no checklist (face/diamond/features_sharp/even_white/uniform/bg_clean/
-  clean) via `score_from_checks`, so it is stable and reproducible. Higher =
-  better; `judge_checks` shows which criteria passed. NOTE the scale depends on
-  `judge_backend`; compare ticks only within the SAME backend. The judge
-  reliably separates broken from good but CANNOT finely rank two already-good
-  renders — use the pixel co-signals + your eyes for fine calls.
-- `ink_coverage` (0–1) — non-white fraction. Density co-signal + guard
-  against degenerate near-solid / near-blank output.
-- `ssim`, `edge_iou` (0–1) — pixel co-signals only; near-flat, don't chase.
-- `path_fit` (0–1) — closeness to reference path count (452). Sanity.
+- `d_score` (0–100, **primary metric**) — how well the render re-expresses its
+  SOURCE as flowing contour lines. It compares the output to its **own source**
+  (the canonical woman portrait, recorded in the render's `stats.json`) at a coarse
+  scale. Two parts:
+  - `d_fidelity` — source-fidelity, dominated by **`d_tone`**: a MULTI-SCALE SSIM
+    (grids 16/32/64, see `d_tone16/32/64`) between the output's local ink-density
+    and the SOURCE's darkness — i.e. does the output actually render the image's
+    tones (dense where the image is dark) AT EVERY SCALE, not just globally? This is
+    THE discriminating signal. The march geodesic drives it positive (canonical
+    `d_tone`≈0.69, artist 0.24–0.67); a field that ignores the image (the old
+    additive wave) had `d_tone`≈0/negative and scores ~43. Keep `d_tone` high.
+  - `d_style` — does it look like the VEX-LINE family at all: dominant line
+    spacing (`d_freq_peak`, `d_peakedness`), ink band (`d_ink`), orientation.
+  - **diamond term** (`d_diamond`, from `d_diag`) — a strong multiplicative factor
+    that rewards the **±45° nested-diamond aesthetic** (the `examples/woman`
+    output-4 look: L1 contours run diagonally) and **penalizes axis-aligned
+    flowing waves**. This is why `method=flow` (horizontal carrier) now scores
+    LOW — the target is diamonds. `d_diag` ≈ 0.50–0.57 is the artist band;
+    ≈ 0.28 (axis-aligned) and ≈ 0.86 (over-regular moiré) are both penalised.
+  Calibrated so the artist's good outputs score 85–100 (busy-source samurai ~75),
+  degenerate output (blank/solid/blob/noise) ~0, and committed plausible-but-wrong
+  hard negatives (`loop/tests/fixtures/hard_neg/`) ≤55 with a ≥20-point margin below
+  the worst good (`dscore_calib.sh` enforces this — it's the anti-false-hill-climb
+  lock). NOTE: the canonical woman render already scores ~100 on `d_tone`; the
+  remaining gap to the artist is *qualitative* (line cleanliness, spacing,
+  recognisability) and the metric is deliberately NOT sensitive to every such
+  difference — a higher `d_score` is necessary, not sufficient. Some off-aesthetic
+  renders (`loop/tests/fixtures/borderline/`) are metrically inside the legit artist
+  band and intentionally NOT penalised; don't expect the score to catch those.
+- `d_fine` (0–1, **the CLIMB signal now that `d_score` has saturated at 100**) —
+  fine-grid tonal fidelity: SSIM of the output's local ink-density vs the SOURCE's
+  darkness at grids 96/128 (FINER than `d_tone`'s 16/32/64; see `d_fine96/128`). On
+  the dense canonical woman it rises monotonically as the hatch gets finer/cleaner
+  and keeps tracking local tone — so it gives headroom that `d_score` (pinned at
+  100) no longer does. Current baseline ≈ **0.47**; the artist's dense woman output
+  (`woman-sample-output-2`) reaches ≈ **0.73** — that gap is the climb. It is
+  REPORTED-ONLY (NOT folded into `d_score`): it is not discriminating across the
+  whole good manifold (the SPARSE good styles — space, samurai, woman-4 diamonds —
+  legitimately score low on fine-tone, so gating on it would false-reject them),
+  but the loop only ever renders the dense woman, where it is valid and robust
+  (negatives crushed: moire ≈0.10, tone_invert ≈−0.38). **`guard_tick.sh` reverts a
+  tick that drops `d_fine` by >`GUARD_FINE_DROP` (0.04) even while `d_score` holds.**
+- `ink_coverage`, `ssim`, `edge_iou`, `path_fit` — legacy pixel co-signals only;
+  near-flat across good/bad, recorded but **don't chase them**.
 
-**Before deciding what to try this tick**, run:
-```
-tail -10 loop/metrics.jsonl | jq -c '{iter, judge_score, judge_gap, ink_coverage}'
-```
-`judge_gap` is the judge's stated **single biggest difference from the
-reference** — this is your steering signal. If judge_score has been flat or
-dropping across the last 3-5 ticks, your hypotheses aren't working — try
-something QUALITATIVELY different (a different idea category, or revert).
+**Before deciding what to try this tick**, read **`loop/STATUS.md`** — the generated
+start-of-tick view: the LIVE knob values + bounds, the recent `d_score`/`d_fine`/…
+trend, the best `d_fine` so far, and why the last tick was kept or reverted. Then
+**`Read loop/output/_latest_compare.png`** — the montage (source | current | best |
+artist target, metrics annotated) so you can SEE what changed, not just the numbers.
+(STATUS.md is regenerated by `score_tick.sh`; raw history is still `loop/metrics.jsonl`
+and `loop/EXPERIMENT_DIGEST.md` distils what's helped / been ruled out.)
 
-Your job: raise the `judge_score` median toward the diamond reference,
-tick by tick. Scores are RELATIVE to the current judge backend — aim to
-beat the recent best on the same backend. A deterministic guard
-(`loop/guard_tick.sh`) auto-commits a passing tick and auto-reverts a
-regression, but still `git checkout -- engine/` your own change before
-exiting if you can see it made things worse.
+`d_score` is already 100 on the canonical — **steer by `d_fine`** (raise it toward
+the artist's ~0.73). Low `d_fidelity`/`d_fine` → the lines don't track the source
+(subject lost / density not tone-modulated, or the hatch is too coarse to render
+fine local tone) — make the hatch finer/denser or change how the field follows the
+image. Low `d_style` → it doesn't read as line art (check `d_freq_peak` ≈ 6–7,
+`d_peakedness`, `d_ink`). If `d_fine` has been flat or dropping across the last
+3–5 ticks, your hypotheses aren't working — try something QUALITATIVELY different
+(a different idea category, or revert).
+
+Your job: keep `d_score` at 100 (don't regress the gate) while raising `d_fine`
+tick by tick toward the artist's ~0.73. A deterministic guard (`loop/guard_tick.sh`)
+auto-commits a passing tick and auto-reverts a regression (absolute `d_score`
+floor + relative drop, AND a `d_fine` drop > `GUARD_FINE_DROP`), but still
+`git checkout -- engine/` your own change before exiting if you can see it made
+things worse.
 
 **Include the latest score line in your log entry.** Use `tail -1
 loop/metrics.jsonl` after `score_tick.sh` runs.
@@ -90,15 +159,17 @@ loop/metrics.jsonl` after `score_tick.sh` runs.
 ## THE GOAL: REPLICATE THE ARTIST'S EXAMPLES
 
 The north star is always to make the canonical output **pass for one of the
-artist's own outputs** (`examples/contour_woman_lineart.png` + `post*`): a crisp
-concentric DIAMOND from a center, lines that bend around features, EVEN spacing,
-generous WHITE SPACE, clean linework edge-to-edge. The judge scores closeness to
-that and tells you the `judge_gap`. A good render is ~85; reaching that is the job.
+artist's own output** for the canonical input — `examples/woman/woman-source.jpeg`
+→ the dense `examples/woman/woman-sample-output-2.jpeg`: nested diamonds that warp
+around the face, dense/tone-modulated in the shadows and detail, clean diamonds in
+flat areas, the subject clearly recognizable. `d_score` measures how well the
+render re-expresses the SOURCE that way; the artist's own output scores ~100 —
+closing the gap to it is the job.
 
 ## BREADTH FIRST — DO NOT HILL-CLIMB
 
 This loop's failure mode is nudging one constant up and down forever. Avoid it:
-- Steer by the latest **`judge_gap`** (what most differs from the reference), but
+- Steer by which part of `d_score` is low (`d_fidelity` vs `d_style`), but
   explore **DIVERSE ways to close it** — not the same knob each time. E.g. if the
   gap is "no diamond / too dense", a true fix might be a new field formula, a
   different distance metric, a new `method=`, equalization, or level spacing —
@@ -163,20 +234,23 @@ source .venv/bin/activate
 ```
 
 Always use this helper rather than hand-rolling a render — it guarantees
-every tick renders identical settings (centered seed, levels 90,
-method=wave) and writes the stats.json without which `path_fit` stays null.
+every tick renders identical settings (centered seed, levels 111,
+method=march) and writes the stats.json (which records the `source` the
+deterministic scorer compares against).
 
-Then view your output and the reference visually:
+Then look at the comparison montage (one image with source | current | best |
+artist target side by side, metrics annotated), assembled automatically by
+`render_tick.sh`:
 
 ```
-# In your prompt, use Read on both:
-Read loop/output/iter_NNN.png
-Read examples/contour_woman_lineart.png
+# Read returns images visually — Read this ONE assembled image:
+Read loop/output/_latest_compare.png
 ```
 
-Read returns images visually. Look at them and compare specifically:
-ring shape (diamonds vs circles), facial feature definition, line
-density, noise in background regions, stroke uniformity.
+Look at it and compare specifically: ring shape (diamonds vs circles), facial
+feature definition, line density, noise in background regions, stroke uniformity —
+both vs the artist target AND vs your best-so-far panel. (To inspect a single panel
+full-res, `Read loop/output/iter_NNN.png` or `examples/woman/woman-sample-output-2.jpeg`.)
 
 ---
 
@@ -197,16 +271,16 @@ log header all share one number.)
 **Change:** {file:line summary, e.g. "engine/field.py:50 — clamp lum
 contribution to top 90th percentile"}
 
-**Test:** canonical (woman, centered seed, levels 65, method=wave)
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
 - output: `loop/output/iter_NNN.svg` ({stats})
-- reference: `examples/contour_woman_lineart.png`
+- source: `examples/woman/woman-source.jpeg`
 - visual comparison: {what you saw — be specific}
 
-**Score:** judge=NN ssim=0.0NNN edge_iou=0.NNNN path_fit=0.NN
-            · vs last 3 avg: judge ΔNN
+**Score:** d_score=NN (fid=0.NNN style=0.NNN) ink=0.NN
+            · vs last 3 avg: d_score ΔNN
 
 **Result:** better / same / worse · vs. reference: {closer / further /
-neutral}  · vs. iter_014 (anchor 95): {N points away}
+neutral}  · vs. artist good output (~95): {N points away}
 
 **Next:** {hypothesis for next tick, or "review" if unclear}
 ```

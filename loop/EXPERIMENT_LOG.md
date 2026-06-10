@@ -3,23 +3,39 @@
 The Ralph loop reads this file each tick to know what's been tried and
 what to try next. Each tick appends a new entry.
 
+## ✅ MILESTONE (2026-06-07): the woman example is now VERY GOOD
+
+The canonical render now matches the artist. Input
+`examples/woman/woman-source.jpeg` → target the dense
+`examples/woman/woman-sample-output-2.jpeg`, rendered with **`method=march`**
+(the tone-cost geodesic, `engine/march.py`), levels 111, 780px. The output is a
+clean, photographic, tone-rendered portrait — the face is depicted by line
+density (dense in shadows/features, sparse in highlights) with L1 diamonds in the
+flats. Tracked evidence: `loop/output/current-woman.png`.
+
+Deterministic score (`loop/dscore.py`): **d_score 100, d_tone 0.74** (artist 0.71),
+d_diag 0.50 (artist 0.50). The breakthrough was twofold — (1) the scorer's
+`d_tone` term (does the output render the source's tones?), which exposed that the
+old additive wave field had d_tone≈0 and scored a *false* 99 → corrected to 47;
+(2) switching the engine to the march geodesic, whose dark-pixels-cost-more
+mechanism actually produces tone-driven density (d_tone −0.19 → +0.74).
+
 ## Definition of done / quality target
 
-"Good" output for the canonical test (input `examples/contour_woman.webp`,
-seed 227,225, levels 111, smooth 0.00) should visually resemble the
-reference outputs `examples/contour_woman_post*.jpeg|webp` — the same
-images the artist produced from this input.
+"Good" output for the canonical test (input `examples/woman/woman-source.jpeg`,
+centered seed, levels 111, smooth 0.00, **method=march**) should visually resemble
+`examples/woman/woman-sample-output-2.jpeg`. Measured by `d_score` (0–100,
+`loop/dscore.py`): tone-fidelity (`d_tone`) + diamond (`d_diag`≈0.50) + style.
 
-Key qualities to match:
-- Diamond-shaped concentric rings centered on the seed
-- Lines that wrap around facial features (eyes, nose, mouth shadows)
-- Background lines that fan out cleanly without noise
-- Path count in the same order of magnitude as `contour_woman_settings.webp`:
-  CHAINS 452 / PTS 135,962. WAVEFRONT should land within ~2x.
+Key qualities to match (now achieved on the woman):
+- Tone-driven line density — DENSE where the image is dark, sparse where bright
+  (this is `d_tone`; the subject emerges as shading, not just geometry)
+- Nested L1 diamonds in flat regions, warped organically around features
+- Background lines clean, no fine noise
 
-Secondary target: the helmet pair
-(`examples/contour_space_pre.jpg` → `examples/contour_space_post.webp`)
-— seed unknown, infer.
+Secondary / holdout: the helmet (`examples/space/`) and samurai
+(`examples/samurai/`) — generalization checks; the march defaults are tuned for
+the high-contrast woman, so smooth subjects score lower (acceptable).
 
 ---
 
@@ -691,3 +707,182 @@ is pinned to `$(cat loop/.iter)` (see PROMPT.md) so this can't recur.
 Also note: the judge 85↔15 swings on near-pixel-identical renders were
 largely judge NOISE — `judge.py` now takes the median of `--samples 3` to
 de-noise, and `guard_tick.sh` gates on that median.
+
+---
+
+## Iter 039 · 2026-06-08 19:00 · new d_fine climb metric + MARCH_TONE 4.0→4.6
+
+**Context:** `d_score` is SATURATED at 100 on the canonical woman — knob-tuning had
+no signal to climb (confirmed by tries this session: blur↑ and base↑ both kept
+d_score=100 while trading tone fidelity for hatch cleanliness, the documented
+"honest limitation"). Probed three global "fine/clean hatch" discriminators
+(structure-tensor coherence, spectral fineness, connected-component fragmentation)
+— ALL non-discriminating: the good-output manifold is too wide (moire/seed_blob
+out-score good women on coherence; woman-dens centroid 30 vs woman-4 103). Only a
+SOURCE-RELATIVE signal separates cleanly.
+
+**Hypothesis:** Fine-grid tonal fidelity (SSIM of output ink-density vs source
+darkness at grids 96/128, finer than d_tone's 16/32/64) gives real headroom on the
+dense canonical render while staying robust (negatives crushed), so it can be the
+loop's climb signal above the d_score ceiling.
+
+**Change:**
+- `loop/dscore.py` — added `fine_tone()` + `d_fine`/`d_fine96`/`d_fine128`,
+  REPORTED-ONLY (NOT in d_score → calib gate untouched, stays 14/0 green).
+- `loop/guard_tick.sh` — added `regression-fine` FAIL on `d_fine` drop
+  > `GUARD_FINE_DROP` (0.04) so a tick can't trade away fine-hatch while d_score holds.
+- `engine/march.py` — `MARCH_TONE` 4.0→4.6 (first real climb tick: denser shadows
+  → better fine-scale local tone).
+- Docs: PROMPT.md, IDEAS.md, CLAUDE.md updated to steer by `d_fine`.
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- d_fine corpus: ours-036 0.443 → ours-039 **0.470** (↑); artist woman-2 **0.696**
+  (the climb target); finer-hatch render (levels 150) 0.513 (confirms lever);
+  negatives moire 0.096, tone_invert −0.377 (crushed).
+- Guard verified: PASS on the 0.470 gain; FAIL (revert) on a forced regression
+  (heavy blur → d_fine 0.364 < 0.470−0.04) while d_score still 100.
+- visual: iter_039 shadows/hair slightly more modeled vs 036; not blown (d_ink 0.41).
+
+**Score:** `iter 39: d_score=100 d_fine=0.4704 (96=0.5108 128=0.43) d_tone=0.7217 d_ink=0.4144 d_diag=0.4949`
+
+**Next:** build — push `d_fine` toward 0.73 with finer/denser hatch (levels↑ or a
+finer field), watching `d_ink`<0.85 and `d_diag` in 0.45–0.60.
+
+---
+
+## Iter 040–048 · 2026-06-08 · d_fine climb (0.443 → 0.534)
+
+Steering by the new `d_fine` signal (d_score saturated at 100 throughout). Kept
+`d_diag` in band (~0.50) and `d_ink` well under the 0.85 gate.
+
+| tick | change | d_fine | d_diag | d_ink | verdict |
+|---|---|---|---|---|---|
+| 40 | CONTRAST 1.4→1.7 | 0.479 | 0.491 | 0.426 | keep ↑ |
+| 41 | GAMMA 1.0→1.25 | 0.463 | 0.493 | 0.417 | revert ↓ (mids flattened) |
+| 42 | TONE 4.6→5.2 | 0.497 | 0.485 | 0.434 | keep ↑ |
+| 43 | TONE 5.2→5.8 | 0.515 | 0.480 | 0.444 | keep ↑ |
+| 44 | TONE 5.8→6.4 | 0.527 | 0.476 | 0.451 | keep ↑ (d_diag eroding) |
+| 45 | EDGE 4.0→5.0 | 0.500 | 0.469 | 0.449 | revert ↓ (edge bunching) |
+| 46 | BASE 0.3→0.4 | 0.524 | **0.498** | 0.429 | keep (restored diamonds, flat d_fine) |
+| 47 | TONE 6.4→7.2 | 0.531 | 0.488 | 0.438 | keep ↑ |
+| 48 | CONTRAST 1.7→2.0 | **0.534** | 0.495 | 0.438 | keep ↑ (peakedness 7.38) |
+
+**Best config:** `MARCH_BASE=0.4 TONE=7.2 EDGE=4.0 GAMMA=1.0 CONTRAST=2.0` (BLUR 2.0).
+Visual (iter_048): clean diamond hatch, strong tonal modeling, deep eye/hair
+shadows, recognizable — best render to date. d_fine 0.534 vs artist 0.73 (closed
+~32% of the baseline gap). TONE was the dominant lever (diminishing returns + slow
+d_diag erosion, countered by BASE↑); CONTRAST independent + clean; GAMMA↑ and EDGE↑
+both regressed.
+
+**Next:** externalize the MARCH_* knobs + multi-input black-box optimizer (see below).
+
+---
+
+## Iter 049 · 2026-06-08 · externalized config + black-box optimizer (d_fine 0.534 → 0.686)
+
+**Built (user-requested infra):**
+- **Externalized knobs**: the 6 `MARCH_*` values now live in `engine/march_params.json`
+  (loaded at import, overrides in-code defaults). `engine.march` exposes
+  `current_params/apply_params/save_params/load_params` + `PARAM_BOUNDS`. app.py's
+  per-request overrides still ride on top; the loop now edits the JSON.
+- **Optimizer** `loop/optimize.py`: derivative-free (pipeline isn't differentiable),
+  Latin-hypercube explore + Nelder-Mead polish. Multi-input CONSTRAINED objective —
+  maximize woman `d_fine` (meaningful only on the dense woman) s.t. the SAME params
+  stay valid on samurai+space (per-source `d_score` floor + `d_ink`<0.85 + woman
+  `d_diag`∈[0.45,0.60]). `d_score` is the cross-input generalization guard, so it
+  can't overfit the metric's blind spots.
+
+**Run:** `--evals 100 --polish` (124 evals, ~2 min). Winner (feasible):
+`BASE 0.324, TONE 12.0, EDGE 0.857, GAMMA 0.6, CONTRAST 1.425, BLUR 1.85` — a region
+hand-tuning never reached (TONE at the rail, EDGE+GAMMA low). Detail: woman
+d_score=100 **d_fine=0.686 (96-grid 0.729 ≈ artist woman-2's 0.730!)** d_ink=0.478
+d_diag=0.468; samurai d_score=91; space d_score=97.
+
+**Visual (iter_049):** best render to date — face smoothly modeled, fine clean
+diagonal hatch, eyes/brows/lips defined, shadows rich but not solid. Better both
+metrically AND visually (not metric-gaming). Closed ~85% of the baseline→artist gap.
+
+**Stopped here** (didn't widen bounds past TONE=12): pushing further risks driving
+`d_fine` into the metric's necessary-not-sufficient blind spot. All gates green
+(calib 14/0, harness 4/0 incl. holdout, unit 6/6).
+
+**FOLLOW-UP (flagged, not done):** `app.py` UI clamps `march_tone` to (0,6) etc. —
+narrower than the optimizer's `PARAM_BOUNDS` (TONE→12). The web UI would clamp the
+tuned config; widen those ranges to match. (app.py has unrelated uncommitted edits,
+left untouched.)
+
+**Next:** more inputs in the optimizer set; or widen bounds + re-run with tighter
+visual review; or back to the ralph loop for a structurally finer hatch.
+
+---
+
+## Iter 050 · 2026-06-08 · THRESHOLD_POWER 1.3→1.0 (linear) — regression, reverted
+
+**Hypothesis:** THRESHOLD_POWER=1.3 concentrates isolines near the seed (low field = bright areas), slightly fighting the march geodesic's natural tone-following density. Linear spacing (1.0) — which the artist reference uses — should preserve the geodesic's natural distribution more faithfully and improve d_fine128.
+
+**Change:** `engine/contour.py:15` — THRESHOLD_POWER 1.3 → 1.0
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- output: `loop/output/iter_050.svg` (333 paths, 156k pts)
+- source: `examples/woman/woman-source.jpeg`
+- visual comparison: not read (reverted on metrics alone — regression visible in d_fine)
+
+**Score:** d_score=100 (fid=0.752 style=0.975) ink=0.44
+            d_fine=0.660 (96=0.707 128=0.614) d_tone=0.833 d_diag=0.451
+            · vs iter 49: d_fine Δ−0.026 (within guard tolerance of 0.04, but still regressed)
+
+**Result:** WORSE — d_fine 0.686 → 0.660. Linear spacing hurt fine-scale tone tracking, despite the reference using it. The P=1.3 concentration near the seed/face HELPS. This is counter-intuitive (we thought it was fighting tone-following) but clear from the numbers: the optimizer-tuned march params need the near-seed concentration to achieve fine mid-tone detail. Drop within guard tolerance so guard would PASS, but manually reverted since d_fine regressed the climb signal.
+
+**Key finding:** THRESHOLD_POWER=1.3 > 1.0 with the optimized march params — the near-seed concentration is beneficial, not harmful. The opposite direction (P > 1.3, e.g. 1.5) may improve further.
+
+**Next:** try THRESHOLD_POWER = 1.5–1.8 (MORE near-seed concentration). The current P=1.3 beats linear; going higher might add more face/mid-tone isoline density and improve d_fine128 (the lagging submetric, 0.614 vs 0.729 for 96-grid). Watch d_diag (was 0.451 at P=1.0, needs to stay ≥0.45).
+
+---
+
+## Iter 051 · 2026-06-08 22:01 · MAX_DIM 640→800 (native 742px grid) — new best d_fine 0.697
+
+**Hypothesis:** The woman source is 742×742. With MAX_DIM=640 it gets downscaled to 640×640 for processing, then isolines are scaled back up ×1.16 to the original. This upscaling introduces positional quantization error (lines can only be placed at 640-grid precision ≈ 1.16px in the output), which hurts d_fine128 (5px cells). Running at native 742×742 resolution eliminates this rounding, placing lines exactly where the geodesic says they should be.
+
+**Also tried this tick (reverted first):** THRESHOLD_POWER=1.3→1.5 (more near-seed concentration). Result: d_fine 0.686→0.676 — WORSE. Both directions from 1.3 are worse (1.0→0.660, 1.5→0.676). THRESHOLD_POWER=1.3 is a local optimum for this knob.
+
+**Change:** `engine/field.py:14` — MAX_DIM 640 → 800. With MAX_DIM=800, the 742×742 woman source is no longer downscaled (742 < 800); march runs at native resolution; contours scale back 1:1; SVG rasterized to 780px (only 1.05× upscale vs old 1.22×).
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- output: `loop/output/iter_051.svg` (359 paths, 203k pts; grid=742×742 vs old 640×640)
+- source: `examples/woman/woman-source.jpeg`
+- visual comparison: finer, more precisely-placed diagonal lines; face tone modeling cleaner; slightly more paths resolving mid-tone transitions better than before
+
+**Score:** d_score=100 (fid=0.768 style=0.978) ink=0.48
+            d_fine=0.697 (96=0.740 128=0.654) d_tone=0.842 d_diag=0.464
+            · vs iter 49 (prev best): d_fine Δ+0.011
+
+**Result:** BETTER — new best d_fine 0.686 → 0.697. All sub-metrics improved. d_diag=0.464 still in artist band [0.45, 0.60]. Guard PASSED, committed as checkpoint.
+
+**Key finding:** Running the geodesic at the source's native pixel resolution (no downscale → no upscale rounding) meaningfully improves fine-grid tone fidelity. The march cost map also benefits from the finer blur footprint (MARCH_BLUR=1.85 covers a smaller fraction of the 742px grid, preserving more fine tonal structure than at 640px).
+
+**Next:** Re-run the optimizer at MAX_DIM=800 — the current march_params.json was found with MAX_DIM=640, so the optimizer's optimal may shift at the new resolution (e.g., MARCH_BLUR may want to decrease since blur is now finer relative to the grid). Or try MAX_DIM=1024 to push further; or explore MARCH_BLUR reduction (currently 1.85, could go lower to reveal even finer tonal detail now that the grid is larger).
+
+---
+
+## Iter 052 · 2026-06-08 · Optimizer re-run at MAX_DIM=800 — new best d_fine 0.702
+
+**Hypothesis:** The iter-049 optimizer winner was found at MAX_DIM=640; since iter-051 raised MAX_DIM to 800 (running the woman source at native 742×742), the joint optimum of all 6 MARCH_* knobs shifts — especially MARCH_BLUR (1.85 pixels covers a smaller fraction of the 742px grid) and MARCH_BASE/MARCH_CONTRAST. Re-running the constrained multi-input optimizer at the new resolution should find a better region of parameter space.
+
+**Change:** ran `python loop/optimize.py --evals 100 --polish` (constrained: woman d_score≥95, samurai d_score≥58, space d_score≥80, d_ink<0.85, woman d_diag∈[0.45,0.60]). Winner: BASE 0.3091 (↓), TONE 12.0 (rail), EDGE 0.8818 (↑), GAMMA 0.6 (rail), CONTRAST 1.3927 (↓), BLUR 1.8826 (↑). Wrote to `engine/march_params.json`.
+
+**Test:** canonical (woman-source, centered seed, levels 111, method=march)
+- output: `loop/output/iter_052.svg` (357 paths, 202k pts; grid=742×742)
+- source: `examples/woman/woman-source.jpeg`
+- visual comparison: comparable to iter 051 best; slightly cleaner mid-tone diagonal transitions; face modeled smoothly; d_fine96 improved to 0.745
+
+**Score:** d_score=100 (fid=0.769 style=0.979) ink=0.48
+            d_fine=0.702 (96=0.745 128=0.659) d_tone=0.842 d_diag=0.466
+            · vs iter 051 (prev best): d_fine Δ+0.005
+
+**Result:** BETTER — new best d_fine 0.697 → 0.702. All constraints satisfied (samurai d_score=88, space d_score=98). Guard PASSED, committed as checkpoint.
+
+**Key finding:** The optimizer at the new native-resolution grid found a slightly different joint optimum — lower BASE (less diamond stiffness), slightly lower CONTRAST, slightly higher BLUR and EDGE. The improvement is modest (~0.005) but consistent direction (96-grid up from 0.740→0.745, 128-grid up from 0.654→0.659). We're at 0.702 vs artist target ~0.73, gap is now ~0.028.
+
+**Next:** consider trying MAX_DIM=1024 (push resolution even further; the woman source is 742px so it won't help for woman but could improve the grid quality model); or focus on a qualitatively different direction — THRESHOLD_POWER was explored (1.3 is optimal), levels 111 is fixed, so the remaining lever may be a formula change inside build_march_field (e.g. normalize cost differently, or try a different cost combination). Or run the optimizer with wider MARCH_TONE bounds (currently capped at 12) to see if TONE>12 helps at native resolution without tripping d_ink.
+
+**Next:** Re-run the optimizer at MAX_DIM=800 — the current march_params.json was found with MAX_DIM=640, so the optimizer's optimal may shift at the new resolution (e.g., MARCH_BLUR may want to decrease since blur is now finer relative to the grid). Or try MAX_DIM=1024 to push further; or explore MARCH_BLUR reduction (currently 1.85, could go lower to reveal even finer tonal detail now that the grid is larger).

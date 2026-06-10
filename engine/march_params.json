@@ -1,0 +1,8 @@
+{
+  "MARCH_BASE": 1.0,
+  "MARCH_BLUR": 1.2,
+  "MARCH_CONTRAST": 1.0,
+  "MARCH_EDGE": 0.0,
+  "MARCH_FLOOR": 0.07,
+  "MARCH_GAMMA": 1.0
+}

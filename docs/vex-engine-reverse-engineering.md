@@ -2,10 +2,53 @@
 
 > **See `contour-v-core-source.md` first** — it holds the verified first-party
 > facts (Ko-fi product copy, the official demo video, the Reddit JS-loop-fix
-> post). This log is the working notes that fed into it. One correction carried
-> through to the engine: the distance metric is **Manhattan (L1)**, producing
-> diamonds — the Euclidean `sqrt` in the formula-derivation section below is
-> superseded (see `algorithm.md`).
+> post, and the STUDIO screenshot decode). This log is the working notes that
+> fed into it. Two corrections carried through to the engine: the distance
+> metric is **Manhattan (L1)**, producing diamonds — the Euclidean `sqrt` in the
+> formula-derivation section below is superseded — and the field is a **fast
+> marching arrival time with reciprocal cost** (see the 2026-06-09 section
+> below), superseding the additive `dist + (255-lum)*k` hypothesis.
+
+## 2026-06-09: STUDIO screenshot decode — the field is fast marching, cost = 1/speed
+
+`examples/ui-screenshot.jpeg` turned out to be a first-party **CONTOUR-V
+STUDIO** screenshot (not our app). Subtitle: "Fast marching contour field →
+plot-ready SVG"; view modes include **SPEED**; PROCESS has an "INVERT
+(DARK = FAST)" toggle. That confirms the field family outright. The remaining
+question was the cost SHAPE, and three independent lines of evidence all point
+to **reciprocal**:
+
+1. **Spacing math.** For an arrival-time field, |∇T| = local cost, so line
+   spacing = (level spacing) / cost. The reference outputs show ~10 px spacing
+   in highlights, ~5 px in midtones, and solid ink in deep darks — a reciprocal
+   response (`cost = 1/clamp(speed_floor, brightness)`: white→1, mid→2,
+   black→1/floor ≈ 14+). A linear-in-darkness cost can't do this: by the time
+   darks saturate, mids are nearly as dense and whites are starved (exactly the
+   failure mode of our linear `MARCH_TONE` tuning — empty forehead diamond,
+   gray mush in mids).
+2. **T RANGE numerology.** CORE woman capture: GRID 438×640, seed (227,228),
+   T max 1173.9. Max L1 seed distance ≈ 638, so the tone term integrates to
+   ~1.8× L1 along cheapest paths — consistent with `cost = 1/speed` over a
+   typical photo (cheapest paths run through bright pixels at cost ≈ 1–2).
+   An additive `L1 + (255-lum)*k` with k=1 caps at ~893 — impossible.
+   STUDIO capture (GRID 600×343, T max 1030.5) fits the same model.
+3. **Prototype validation.** `cost = 1/clip(blur(lum)/255, 0.07, 1)` on a
+   4-connected MCP grid, 111 linear levels, min-pts 4, T-max 99.5% clip,
+   constant 0.8 px black stroke — near-matched woman/space/samurai reference
+   outputs in one shot. On the canonical woman it scored d_tone 0.758 (the
+   artist's own output-2 scores 0.672 against the same source) and
+   path count 795 vs the artist's 652 (vs 267 for our then-current render,
+   which filtered paths < 30 points).
+
+Downstream-pipeline facts lifted from the same screenshot (see
+`contour-v-core-source.md` for the full control inventory): SPACING **Linear**
+level distribution; **T-MAX %** clip (99.50); **MIN PTS 4** path filter —
+keeping tiny closed loops is what makes eyes/darks render solid; **STEP 3 px**
+polyline resample (the clean-line secret at LINE SMOOTH 0); CHAIN GAP 0.60 px
+segment chaining; **STROKE 0.70 px constant, STROKE MOD off** — the export is
+full-opacity ink, weight modulation is opt-in (our old unconditional
+opacity fade 0.95→0.35 was a divergence, not a match); TSP ordering of chains
+within each level (pen-travel optimization, not visual).
 
 ## Source Material
 

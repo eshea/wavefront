@@ -12,27 +12,52 @@
 #   iter_NNN.png         — rasterized via rsvg-convert (for Read + judge)
 #   iter_NNN.stats.json  — the stats block (paths, total_points, levels, t_*, grid)
 #
-# Canonical settings: centered seed, levels 90, smooth 0.00, lum_mix 0.8,
-# wt_range 0.0, method=wave (the active L1-diamond field).
+# Canonical settings: centered seed, levels 111, smooth 0.00, lum_mix 0.8,
+# wt_range 0.0, method=march (the active method — a 4-connected geodesic where
+# dark pixels cost more, so contours BUNCH in dark regions: tone-driven density
+# that actually renders the image, while 4-connectivity keeps L1 diamonds). levels
+# 111 = CONTOUR-V CORE density; the 780px raster (PNG_WIDTH) resolves the lines.
 #
 # Usage:
 #   ./loop/render_tick.sh <iter_number>
 #
-# Env overrides: PNG_WIDTH (default 434), METHOD (default wave).
+# Env overrides: PNG_WIDTH (default 780), METHOD (default march).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 iter_num=$((10#${1:?iter number required}))   # force base-10 ('033' is octal otherwise)
-png_width="${PNG_WIDTH:-434}"
-method="${METHOD:-wave}"   # the loop tunes build_wave_field (L1-diamond, the active method)
+png_width="${PNG_WIDTH:-780}"   # resolves CORE-like dense contours (111 levels) without raster aliasing
+method="${METHOD:-march}"   # the loop tunes engine/march.py build_march_field (tone-cost geodesic diamonds — renders the image's tones)
 
-python_bin="python"
-command -v python >/dev/null 2>&1 || python_bin="python3"
+# Prefer the project venv python (it has the deps); the loop may invoke this from a
+# subprocess where the venv isn't activated, so don't rely on PATH `python`.
+if [ -x .venv/bin/python ]; then
+  python_bin=".venv/bin/python"
+elif command -v python >/dev/null 2>&1; then
+  python_bin="python"
+else
+  python_bin="python3"
+fi
 
 "$python_bin" loop/render.py "$iter_num" \
   --method "$method" \
-  --levels 90 \
+  --levels 111 \
   --smooth 0.0 \
   --lum-mix 0.8 \
   --wt-range 0.0 \
   --png-width "$png_width"
+
+# Assemble the legible comparison montage (source | current | best | target) the
+# agent Reads at a stable path. Best-effort: a montage failure must NOT fail a tick.
+"$python_bin" loop/montage.py "$iter_num" || echo "[render_tick] montage skipped" >&2
+
+# Garbage-collect old per-tick dumps so loop/output stays small/legible. Keep the
+# most recent KEEP iter_NNN renders; never touch the force-tracked input fixture
+# iter_014.png (it's a test dependency — see .gitignore). The _best/_latest_compare
+# images and current-woman.*/march_sample_* fixtures don't match the iter_NNN glob.
+keep="${OUTPUT_KEEP:-20}"
+ls -1t loop/output/iter_[0-9]*.png 2>/dev/null | grep -v '/iter_014\.png$' \
+  | tail -n +"$((keep + 1))" | while read -r old; do
+  base="${old%.png}"
+  rm -f "$base.png" "$base.svg" "$base.stats.json"
+done

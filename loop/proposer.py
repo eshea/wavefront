@@ -7,7 +7,7 @@ loop, over-works (edits many files, self-scores, never stops). So here the
 HARNESS drives and the model does the one thing it's reliable at: propose ONE
 edit. Per tick we:
   1. render the CURRENT code so the model sees the real output,
-  2. give the model context (recent judge_score+judge_gap, IDEAS, the editable
+  2. give the model context (recent d_score: fidelity+style, IDEAS, the editable
      files) + the current render + the reference image,
   3. get ONE edit (HYPOTHESIS/CATEGORY/FILE/SEARCH/REPLACE) — retrying only to
      get a VALID applicable edit (max 3 calls), never to "keep going",
@@ -33,8 +33,8 @@ import prompts  # noqa: E402
 LLM_BASE = os.environ.get("WAVEFRONT_LLM", "http://neuromancer:8000").rstrip("/")
 MODEL = os.environ.get("WAVEFRONT_LLM_MODEL", "qwen")
 REPO = Path(__file__).resolve().parent.parent
-REFERENCE = REPO / "examples" / "contour_woman_lineart.png"
-EDITABLE = ["engine/field.py", "engine/contour.py"]   # the tuning surface shown
+REFERENCE = REPO / "examples" / "woman" / "woman-sample-output-2.jpeg"   # matched target for the woman-source input
+EDITABLE = ["engine/march.py"]   # the tuning surface shown (the active method=march)
 MAX_ATTEMPTS = 3
 
 
@@ -61,31 +61,41 @@ def recent_metrics(n=6):
     rows = [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
     out = []
     for r in rows[-n:]:
-        out.append(f"iter {r.get('iter')}: judge={r.get('judge_score')} "
-                   f"gap={r.get('judge_gap','')!r}")
+        out.append(f"iter {r.get('iter')}: d_score={r.get('d_score')} "
+                   f"fid={r.get('d_fidelity')} style={r.get('d_style')}")
     return "\n".join(out) or "（none yet）"
 
 
 ACTIVE_NOTE = """# ACTIVE SURFACE — what actually affects the scored render
-The canonical render uses **method=wave** (build_wave_field, the L1-diamond
-field), so ONLY these constants change the output:
-  - engine/field.py  -> build_wave_field()'s knobs:
-      WAVE_DIAMOND   (0=full luminance ripple, 1=ignore the face -> crisp diamonds)
-      WAVE_RELIEF    (luminance ripple amplitude; low => diamonds dominate)
-      WAVE_SIGMA_FACE(blur near the seed; lower => more feature wrap)
-      WAVE_SIGMA_BG  (blur far from the seed; higher => calmer background)
-      WAVE_FAR       (far-field ripple multiplier; lower => cleaner bg diamonds)
-      WAVE_INNER / WAVE_OUTER (face vs background zone radii, fraction of min(W,H))
-  - engine/contour.py -> THRESHOLD_POWER  (level spacing; 1.0 = even spacing)
-  - the render also passes lum_mix=0.8 (scales the wave relief).
-IGNORE FIELD_DENOISE_SIGMA, FIELD_SHADOW_LIFT, build_field(), and engine/flow.py
-— those are PARKED experiments (method=contour/flow), NOT rendered. Editing them
-does NOTHING. Edit a WAVE_* constant or THRESHOLD_POWER (one per tick)."""
+The canonical render uses **method=march** (engine/march.py build_march_field — a
+4-connected FAST-MARCHING field with RECIPROCAL cost, the confirmed CONTOUR-V
+model: speed = clip(gray, MARCH_FLOOR, 1), cost = MARCH_BASE + lum_mix*(1/speed-1)
++ MARCH_EDGE*edge. Isoline spacing = level spacing / cost, so whites stay open,
+mids compress gently, and deep darks saturate to SOLID ink — tone-driven density
+that actually RENDERS the image's tones — while 4-connectivity keeps L1 diamonds).
+ONLY these module constants in engine/march.py change the output:
+  - MARCH_FLOOR     speed floor (THE tone lever). LOWER => deep darks cost up to
+                    1/FLOOR => solid-ink shadows => higher d_tone/d_fine.
+  - MARCH_EDGE      edge magnitude -> extra cost. Usually unnecessary — tonal
+                    pileup falls out of the reciprocal. Lowers d_diag (more warp).
+  - MARCH_BASE      flat per-step cost = diamond dominance. LOW => image warps
+                    the diamonds organically (d_diag in band); HIGH => stiff
+                    diamonds (d_diag above band, the diamond factor penalises it).
+  - MARCH_CONTRAST / MARCH_GAMMA  tonal pre-shaping of the gray (contrast about mid,
+                    then gamma) before the cost — shapes which tones drive density.
+  - MARCH_BLUR      denoise sigma (tames busy source texture).
+  - the render passes levels=111, lum_mix=0.8 (111 = CONTOUR-V CORE's CONTOURS density;
+    lum_mix scales the tone term). Watch d_ink: if shadows go solid black (d_ink>0.85)
+    the gate zeroes the score — raise MARCH_FLOOR or raise MARCH_CONTRAST.
+IGNORE the WAVE_*/FLOW_*/FIELD_* constants and build_wave_field/trace_flow_lines —
+those are PARKED methods, NOT rendered now. Tune ONE MARCH_* value per tick by
+editing engine/march_params.json (the externalized config that overrides the
+march.py defaults), or run loop/optimize.py to sweep all 6 at once."""
 
 
 def build_user_text():
     parts = [ACTIVE_NOTE, "",
-             "# Recent results (judge_score + judge_gap)", recent_metrics(), ""]
+             "# Recent results (d_score: fidelity + style)", recent_metrics(), ""]
     parts += ["# Idea backlog (loop/IDEAS.md)",
               (REPO / "loop" / "IDEAS.md").read_text(), ""]
     parts += ["# Editable files (copy SEARCH text VERBATIM from here)"]

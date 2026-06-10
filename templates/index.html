@@ -149,6 +149,28 @@
       border: none;
     }
 
+    /* Method select */
+    select.select {
+      width: 100%;
+      padding: 7px 8px;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border-2);
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      outline: none;
+      cursor: pointer;
+    }
+    select.select:focus { border-color: var(--accent); }
+    .method-desc {
+      font-size: 9px;
+      color: var(--text-mute);
+      margin-top: 6px;
+      line-height: 1.4;
+      letter-spacing: 0.04em;
+    }
+
     /* Seed */
     .seed-disp {
       font-size: 10px;
@@ -348,18 +370,34 @@
     </div>
 
     <div class="section">
+      <div class="section-label">ALGORITHM</div>
+      <select id="s-method" class="select">
+        <option value="contour">CONTOUR — uniform diamonds</option>
+        <option value="wave">WAVE — L1 diamonds + relief</option>
+        <option value="march" selected>MARCH — weighted-distance waves</option>
+        <option value="flow">FLOW — streamlines</option>
+      </select>
+      <div class="method-desc" id="method-desc"></div>
+    </div>
+
+    <div class="section">
       <div class="section-label">CONTOUR</div>
       <div class="slider-row">
-        <div class="slider-head"><span class="name">LEVELS</span><span class="val" id="v-levels">63</span></div>
-        <input type="range" id="s-levels" min="10" max="150" step="1" value="63">
+        <div class="slider-head"><span class="name">LEVELS</span><span class="val" id="v-levels">111</span></div>
+        <input type="range" id="s-levels" min="10" max="150" step="1" value="111">
       </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">ALGORITHM PARAMS</div>
+      <div id="method-knobs"></div>
     </div>
 
     <div class="section">
       <div class="section-label">LINEWORK</div>
       <div class="slider-row">
-        <div class="slider-head"><span class="name">SMOOTH</span><span class="val" id="v-smooth">0.70</span></div>
-        <input type="range" id="s-smooth" min="0" max="1" step="0.05" value="0.70">
+        <div class="slider-head"><span class="name">SMOOTH</span><span class="val" id="v-smooth">0.00</span></div>
+        <input type="range" id="s-smooth" min="0" max="1" step="0.05" value="0.00">
       </div>
     </div>
 
@@ -370,12 +408,12 @@
       </div>
       <div class="adv-body">
         <div class="slider-row">
-          <div class="slider-head"><span class="name">LUM MIX</span><span class="val" id="v-lum">1.00</span></div>
-          <input type="range" id="s-lum" min="0" max="2" step="0.05" value="1.00">
+          <div class="slider-head"><span class="name">LUM MIX</span><span class="val" id="v-lum">0.80</span></div>
+          <input type="range" id="s-lum" min="0" max="2" step="0.05" value="0.80">
         </div>
         <div class="slider-row">
-          <div class="slider-head"><span class="name">WT RANGE</span><span class="val" id="v-wt">0.60</span></div>
-          <input type="range" id="s-wt" min="0" max="1" step="0.05" value="0.60">
+          <div class="slider-head"><span class="name">WT RANGE</span><span class="val" id="v-wt">0.00</span></div>
+          <input type="range" id="s-wt" min="0" max="1" step="0.05" value="0.00">
         </div>
       </div>
     </div>
@@ -467,6 +505,18 @@
   const sSmooth = $('s-smooth'), vSmooth = $('v-smooth');
   const sLum = $('s-lum'), vLum = $('v-lum');
   const sWt = $('s-wt'), vWt = $('v-wt');
+  const sMethod = $('s-method'), methodDesc = $('method-desc'), methodKnobsEl = $('method-knobs');
+
+  // Method blurbs + dynamic knob plumbing.
+  const METHOD_DESC = {
+    contour: 'Uniform Manhattan field — concentric diamonds warped by luminance.',
+    wave: 'L1-diamond field with a gentle, seed-faded luminance relief.',
+    march: '4-connected weighted distance — waves bunch denser in dark regions.',
+    flow: 'Evenly-spaced streamlines along the image, with a directional carrier.',
+  };
+  let knobConfig = null;            // {method: [{field,min,max,default}]}
+  const knobVals = {};              // {method: {field: value}} — remembers edits per method
+  let curKnobInputs = {};           // {field: inputEl} for the visible method
 
   const seedDisp = $('seed-disp');
   const bReset = $('b-reset');
@@ -504,6 +554,57 @@
   bindSlider(sSmooth, vSmooth, 2);
   bindSlider(sLum, vLum, 2);
   bindSlider(sWt, vWt, 2);
+
+  // ---------- Dynamic per-method knobs (driven by /config) ----------
+  function knobLabel(field) {
+    return field.replace(/^(field|wave|march|flow)_/, '').replace(/_/g, ' ').toUpperCase();
+  }
+  function knobStep(span) {
+    if (span <= 2) return 0.02;
+    if (span <= 5) return 0.1;
+    if (span <= 20) return 0.5;
+    return 1;
+  }
+  function renderMethodKnobs(method) {
+    curKnobInputs = {};
+    methodKnobsEl.innerHTML = '';
+    const specs = (knobConfig && knobConfig[method]) || [];
+    if (!specs.length) {
+      methodKnobsEl.innerHTML = '<div class="method-desc">No tunable params for this method.</div>';
+      return;
+    }
+    const remembered = knobVals[method] || (knobVals[method] = {});
+    specs.forEach(spec => {
+      const step = knobStep(spec.max - spec.min);
+      const dec = step < 1 ? 2 : 0;
+      const val = (spec.field in remembered) ? remembered[spec.field] : spec.default;
+      const row = document.createElement('div');
+      row.className = 'slider-row';
+      row.innerHTML =
+        `<div class="slider-head"><span class="name">${knobLabel(spec.field)}</span>` +
+        `<span class="val" id="kv-${spec.field}"></span></div>` +
+        `<input type="range" id="k-${spec.field}" min="${spec.min}" max="${spec.max}" step="${step}" value="${val}">`;
+      methodKnobsEl.appendChild(row);
+      const input = $('k-' + spec.field), valEl = $('kv-' + spec.field);
+      const upd = () => {
+        valEl.textContent = parseFloat(input.value).toFixed(dec);
+        remembered[spec.field] = input.value;
+      };
+      input.addEventListener('input', upd);
+      upd();
+      curKnobInputs[spec.field] = input;
+    });
+  }
+  function syncMethodUI() {
+    methodDesc.textContent = METHOD_DESC[sMethod.value] || '';
+    renderMethodKnobs(sMethod.value);
+  }
+  sMethod.addEventListener('change', syncMethodUI);
+
+  fetch('/config')
+    .then(r => r.json())
+    .then(cfg => { knobConfig = cfg.knobs; syncMethodUI(); })
+    .catch(() => { methodDesc.textContent = METHOD_DESC[sMethod.value] || ''; });
 
   // ---------- Status helpers ----------
   const setStatus = (msg, kind = '') => {
@@ -738,12 +839,15 @@
 
     const fd = new FormData();
     fd.append('image', state.file);
+    fd.append('method', sMethod.value);
     fd.append('levels', sLevels.value);
     fd.append('smooth', sSmooth.value);
     fd.append('lum_mix', sLum.value);
     fd.append('wt_range', sWt.value);
     if (state.seedX != null) fd.append('seed_x', state.seedX);
     if (state.seedY != null) fd.append('seed_y', state.seedY);
+    // Active method's tuning knobs.
+    Object.entries(curKnobInputs).forEach(([field, input]) => fd.append(field, input.value));
 
     bCompute.disabled = true;
     bCompute.textContent = 'COMPUTING...';
