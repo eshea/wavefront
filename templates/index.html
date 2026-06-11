@@ -210,6 +210,13 @@
       cursor: not-allowed;
     }
     .btn + .btn { margin-top: 6px; }
+    .param-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .param-actions .btn { margin-top: 0; }
+    .param-actions .btn + .btn { margin-top: 0; }
     .btn.sm {
       padding: 5px 8px;
       font-size: 9px;
@@ -391,6 +398,10 @@
     <div class="section">
       <div class="section-label">ALGORITHM PARAMS</div>
       <div id="method-knobs"></div>
+      <div class="param-actions">
+        <button class="btn" id="b-autotune">AUTO-TUNE</button>
+        <button class="btn" id="b-reset-params">RESET DEFAULTS</button>
+      </div>
     </div>
 
     <div class="section">
@@ -520,6 +531,8 @@
 
   const seedDisp = $('seed-disp');
   const bReset = $('b-reset');
+  const bAutotune = $('b-autotune');
+  const bResetParams = $('b-reset-params');
   const bCompute = $('b-compute');
   const bSvg = $('b-svg');
   const bPng = $('b-png');
@@ -591,6 +604,7 @@
         remembered[spec.field] = input.value;
       };
       input.addEventListener('input', upd);
+      input.addEventListener('input', scheduleRender);
       upd();
       curKnobInputs[spec.field] = input;
     });
@@ -598,8 +612,10 @@
   function syncMethodUI() {
     methodDesc.textContent = METHOD_DESC[sMethod.value] || '';
     renderMethodKnobs(sMethod.value);
+    // AUTO-TUNE only suggests MARCH_* knobs, so it's march-only.
+    bAutotune.style.display = (sMethod.value === 'march') ? '' : 'none';
   }
-  sMethod.addEventListener('change', syncMethodUI);
+  sMethod.addEventListener('change', () => { syncMethodUI(); scheduleRender(); });
 
   fetch('/config')
     .then(r => r.json())
@@ -749,6 +765,7 @@
           hint.style.display = 'none';
           redraw();
           setStatus('READY. CLICK CANVAS TO SEED OR COMPUTE.', 'ok');
+          scheduleRender();   // auto-render the first preview on upload
         };
         img.src = j.data_url;
       })
@@ -812,6 +829,7 @@
     state.seedY = iy;
     updateSeedDisp();
     redraw();
+    scheduleRender();   // re-render with the new seed
   });
 
   function updateSeedDisp() {
@@ -833,9 +851,17 @@
     redraw();
   });
 
-  // ---------- Compute ----------
-  bCompute.addEventListener('click', () => {
+  // ---------- Compute (shared by the COMPUTE button + live auto-render) ----------
+  let inflight = null;      // AbortController for the in-flight /process request
+  let renderTimer = null;   // debounce timer for live re-render
+
+  function runProcess() {
     if (!state.file) { setStatus('UPLOAD AN IMAGE FIRST', 'err'); return; }
+
+    // Cancel any still-running render so the latest settings always win.
+    if (inflight) inflight.abort();
+    const controller = new AbortController();
+    inflight = controller;
 
     const fd = new FormData();
     fd.append('image', state.file);
@@ -854,9 +880,10 @@
     setStatus('COMPUTING CONTOURS...');
 
     const t0 = performance.now();
-    fetch('/process', { method: 'POST', body: fd })
+    fetch('/process', { method: 'POST', body: fd, signal: controller.signal })
       .then(r => r.json())
       .then(j => {
+        if (controller !== inflight) return;   // a newer request superseded this one
         if (j.error) {
           setStatus('ERR: ' + j.error, 'err');
           return;
@@ -887,11 +914,73 @@
         };
         img.src = url;
       })
-      .catch(err => setStatus('ERR: ' + err.message, 'err'))
+      .catch(err => {
+        if (err.name === 'AbortError') return;  // superseded — stay quiet
+        setStatus('ERR: ' + err.message, 'err');
+      })
       .finally(() => {
-        bCompute.disabled = false;
-        bCompute.textContent = 'COMPUTE';
+        // Only the active request restores the button (a superseded one must not
+        // clobber the COMPUTING state of the request that replaced it).
+        if (controller === inflight) {
+          inflight = null;
+          bCompute.disabled = false;
+          bCompute.textContent = 'COMPUTE';
+        }
       });
+  }
+
+  // Debounced live re-render — fires ~300ms after the last knob/slider change.
+  function scheduleRender() {
+    if (!state.file) return;
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(runProcess, 300);
+  }
+
+  bCompute.addEventListener('click', runProcess);
+
+  // Live re-render on any core control change (dynamic knobs are wired in
+  // renderMethodKnobs; method change is wired in syncMethodUI's listener).
+  [sLevels, sSmooth, sLum, sWt].forEach(s => s.addEventListener('input', scheduleRender));
+
+  // ---------- Reset params to defaults ----------
+  bResetParams.addEventListener('click', () => {
+    // Core sliders -> their original HTML defaults (defaultValue is unaffected by
+    // dragging); dispatch 'input' so labels + remembered values resync.
+    [sLevels, sSmooth, sLum, sWt].forEach(s => {
+      s.value = s.defaultValue;
+      s.dispatchEvent(new Event('input'));
+    });
+    // Drop remembered knob edits and re-render knobs at their /config defaults.
+    delete knobVals[sMethod.value];
+    renderMethodKnobs(sMethod.value);
+    scheduleRender();
+  });
+
+  // ---------- Auto-tune (image-adaptive MARCH_* suggestion) ----------
+  function applyParams({ levels, knobs }) {
+    if (levels != null) { sLevels.value = levels; sLevels.dispatchEvent(new Event('input')); }
+    Object.entries(knobs || {}).forEach(([field, v]) => {
+      const input = curKnobInputs[field];
+      if (input) { input.value = v; input.dispatchEvent(new Event('input')); }
+    });
+    scheduleRender();
+  }
+
+  bAutotune.addEventListener('click', () => {
+    if (!state.file) { setStatus('UPLOAD AN IMAGE FIRST', 'err'); return; }
+    bAutotune.disabled = true;
+    setStatus('AUTO-TUNING...');
+    const fd = new FormData();
+    fd.append('image', state.file);
+    fetch('/autotune', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(j => {
+        if (j.error) { setStatus('ERR: ' + j.error, 'err'); return; }
+        applyParams(j);
+        setStatus('AUTO-TUNED · rendering…', 'ok');
+      })
+      .catch(err => setStatus('ERR: ' + err.message, 'err'))
+      .finally(() => { bAutotune.disabled = false; });
   });
 
   function updateStats(s) {

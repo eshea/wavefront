@@ -103,8 +103,41 @@ def apply_params(params):
     g = globals()
     for name, val in params.items():
         if name in PARAM_BOUNDS:
-            lo, hi = PARAM_BOUNDS[name]
-            g[name] = float(max(lo, min(hi, val)))
+            g[name] = _clamp_to_bounds(name, val)
+
+
+def _clamp_to_bounds(name, val):
+    """Clamp a single knob value into its PARAM_BOUNDS range."""
+    lo, hi = PARAM_BOUNDS[name]
+    return float(max(lo, min(hi, val)))
+
+
+def suggest_params(gray):
+    """Image-adaptive knob suggestion from a normalized luminance array in [0,1]
+    (0=black, 1=white). Returns {MARCH_*: float, 'levels': int}, each MARCH_* clamped
+    to PARAM_BOUNDS and levels to 60..150.
+
+    Heuristic, eyeball-tunable (the coefficients are a deliberate first pass —
+    validate against examples/ before trusting). Mirrors the tone reasoning in
+    loop/IDEAS.md: FLOOR is THE tone lever, CONTRAST/GAMMA are the STUDIO tonal
+    controls. Only the three tonal knobs + levels are returned; BASE/EDGE/BLUR are
+    left at their current live values."""
+    p10, p50, p90 = (float(x) for x in np.percentile(gray, [10, 50, 90]))
+    dark_frac = float((gray < 0.25).mean())
+    spread = p90 - p10
+    out = {
+        # More dark mass -> HIGHER floor, so heavy shadows don't over-densify into a
+        # blob (the "shadow areas too busy" JS-loop lesson, docs/contour-v-core-source.md).
+        # Little dark mass -> low floor so the few darks still saturate to solid ink.
+        "MARCH_FLOOR":    0.04 + 0.5 * dark_frac,
+        # Flat / low dynamic range -> lift contrast to separate tones; wide range -> ~1.
+        "MARCH_CONTRAST": 1.0 + (0.5 - spread) * 2.0,
+        # Dark median -> gamma<1 lifts mids; bright median -> gamma>1 adds midtone density.
+        "MARCH_GAMMA":    0.6 + p50 * 1.0,
+    }
+    out = {k: _clamp_to_bounds(k, v) for k, v in out.items()}
+    out["levels"] = int(max(60, min(150, round(80 + 90 * spread))))
+    return out
 
 
 def save_params(path=_PARAMS_PATH):

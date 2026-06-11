@@ -9,6 +9,7 @@ from PIL import Image
 from app import app
 from engine.contour import scale_contours
 from engine.field import MAX_DIM, load_and_preprocess
+from engine.march import PARAM_BOUNDS, suggest_params
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -147,6 +148,63 @@ class ProcessEndpointTests(unittest.TestCase):
         )
         self.assertEqual(corrupt_image.status_code, 400)
         self.assertIn('image', corrupt_image.get_json()['error'].lower())
+
+
+class SuggestParamsTests(unittest.TestCase):
+    def _assert_within_bounds(self, suggestion):
+        for name, (lo, hi) in PARAM_BOUNDS.items():
+            if name in suggestion:
+                self.assertGreaterEqual(suggestion[name], lo)
+                self.assertLessEqual(suggestion[name], hi)
+        self.assertGreaterEqual(suggestion['levels'], 60)
+        self.assertLessEqual(suggestion['levels'], 150)
+        self.assertIsInstance(suggestion['levels'], int)
+
+    def test_suggest_params_stays_within_bounds_for_extremes(self):
+        for gray in (np.zeros((40, 40), dtype=np.float32),     # all black
+                     np.ones((40, 40), dtype=np.float32),       # all white
+                     np.full((40, 40), 0.5, dtype=np.float32)): # flat mid-grey
+            with self.subTest(mean=float(gray.mean())):
+                self._assert_within_bounds(suggest_params(gray))
+
+    def test_suggest_params_on_real_sample_image(self):
+        with EXAMPLE.open('rb') as f:
+            rgb, _, _ = load_and_preprocess(f)
+        gray = rgb.mean(axis=2).astype(np.float32) / 255.0
+        self._assert_within_bounds(suggest_params(gray))
+
+    def test_darker_image_gets_higher_floor(self):
+        bright = np.full((40, 40), 0.9, dtype=np.float32)
+        dark = np.full((40, 40), 0.05, dtype=np.float32)
+        self.assertGreater(
+            suggest_params(dark)['MARCH_FLOOR'],
+            suggest_params(bright)['MARCH_FLOOR'],
+        )
+
+
+class AutotuneEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_autotune_returns_levels_and_in_bounds_knobs(self):
+        data = {'image': (image_bytes(size=(64, 48)), 'tiny.png')}
+        response = self.client.post('/autotune', data=data,
+                                    content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        payload = response.get_json()
+        self.assertIn('levels', payload)
+        self.assertIn('knobs', payload)
+        self.assertGreaterEqual(payload['levels'], 60)
+        self.assertLessEqual(payload['levels'], 150)
+        for name, value in payload['knobs'].items():
+            lo, hi = PARAM_BOUNDS[name]
+            self.assertGreaterEqual(value, lo)
+            self.assertLessEqual(value, hi)
+
+    def test_autotune_missing_image_returns_400(self):
+        response = self.client.post('/autotune', data={},
+                                    content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 400)
 
 
 if __name__ == '__main__':

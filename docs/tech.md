@@ -44,7 +44,18 @@ JSON { svg, stats, img/processing dims, seed } → browser renders + offers expo
 ```
 
 There is also `POST /thumbnail` (returns a base64 downscaled ghost overlay for
-the preview canvas).
+the preview canvas) and `POST /autotune` (image-adaptive knob suggestion for
+`method=march`: analyzes the uploaded image's luminance on the same preprocessed
+grid the engine sees and returns `{levels, knobs}` tuned for that image, via
+`engine.march.suggest_params` — a fast heuristic, NOT the slow `loop/optimize.py`
+search). The UI consumes it from the **AUTO-TUNE** button.
+
+The web UI **re-renders live**: changing any slider/knob (or the seed) debounces
+a `/process` call (~300ms) and cancels any in-flight render, so the latest
+settings always win — the COMPUTE button is now a manual fallback. **RESET
+DEFAULTS** restores every control to its `/config` default (core sliders from
+their original values, `MARCH_*` knobs from the engine defaults); **AUTO-TUNE**
+applies the per-image suggestion.
 
 ## Key design points
 

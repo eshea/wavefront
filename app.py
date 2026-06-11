@@ -315,6 +315,37 @@ def thumbnail():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/autotune', methods=['POST'])
+def autotune():
+    """
+    Image-adaptive knob suggestion for method=march ("AUTO-TUNE" button).
+
+    Analyzes the uploaded image's luminance on the same preprocessed grid the
+    engine sees, then returns MARCH_* knobs + levels tuned for THAT image (fast
+    heuristic, not the slow black-box optimizer — see engine.march.suggest_params).
+
+    Accepts: multipart form with 'image' file
+    Returns JSON: { levels: int, knobs: { MARCH_FLOOR: float, ... } }
+    """
+    try:
+        image_file = _required_image_file()
+        try:
+            rgb_array, _, _ = load_and_preprocess(image_file)
+        except (UnidentifiedImageError, OSError) as exc:
+            raise RequestValidationError('Invalid or corrupt image data') from exc
+
+        gray = to_luminance(rgb_array).astype('float32') / 255.0
+        suggestion = em.suggest_params(gray)
+        levels = suggestion.pop('levels')
+        return jsonify({'levels': levels, 'knobs': suggestion})
+
+    except RequestValidationError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5055))
     host = os.environ.get('HOST', '127.0.0.1')
