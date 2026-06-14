@@ -1,0 +1,28 @@
+name: Wavefront CI
+
+on:
+  push:
+    branches-ignore: []
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: [self-hosted, linux, wintermute, ci]
+    environment: dev
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Provision Python
+        run: |
+          uv python install 3.13
+          echo "PYTHON=$(uv python find 3.13)" >> "$GITHUB_ENV"
+
+      - name: make ci
+        run: make ci

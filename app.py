@@ -171,6 +171,11 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/healthz')
+def healthz():
+    return jsonify({'ok': True})
+
+
 @app.route('/config')
 def config():
     """Knob registry for the UI — one source of truth so the sliders always match
