@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "wavefront",
       script: "app.py",
-      interpreter: process.env.PYTHON || ".venv/bin/python",
+      interpreter: ".venv/bin/python",
       cwd: __dirname,
       env: {
         HOST: "0.0.0.0",
