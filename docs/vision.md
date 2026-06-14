@@ -41,6 +41,16 @@ The reference outputs in `examples/` define the target. Concretely:
   advanced geometry controls, workflow tools. That feature list is WAVEFRONT's
   upgrade backlog. WAVEFRONT already exposes `lum_mix` and stroke-weight as
   sliders (CORE keeps these internal) as a first step in that direction.
+- **Mural / large-format output (extension beyond CORE).** Opt-in features for
+  producing big physical wall pieces from one photo: a **wide canvas** that pads
+  the subject into a chosen aspect (e.g. 7ft×3.5ft ≈ 2:1) and lets the diamond
+  field fill the margins; **multi-pen color separations** (duotone by darkness, or
+  a depth/elevation color ramp — exported as Inkscape pen layers for plotters);
+  and **print-ready export** (physical units stamped on the SVG, raised processing
+  detail for large sources). All default off — CORE renders single black ink at
+  source aspect unchanged. See `algorithm.md` → "Mural extensions". Production
+  paths (large-format print shop vs wall-drawing robot vs projection) are a
+  separate, non-code workflow choice.
 
 ## How we get there
 

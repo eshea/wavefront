@@ -163,6 +163,33 @@
       cursor: pointer;
     }
     select.select:focus { border-color: var(--accent); }
+    input.tin {
+      width: 100%;
+      padding: 7px 8px;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border-2);
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      outline: none;
+    }
+    input.tin:focus { border-color: var(--accent); }
+    input.tin::placeholder { color: var(--text-mute); letter-spacing: 0.04em; }
+    .ctl-row { margin-bottom: 8px; }
+    .ctl-row:last-child { margin-bottom: 0; }
+    .ctl-lbl {
+      font-size: 9px; color: var(--text-mute);
+      letter-spacing: 0.1em; margin-bottom: 4px;
+    }
+    .duo { display: flex; gap: 6px; }
+    .duo > * { flex: 1; min-width: 0; }
+    .swatches { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+    .swatch {
+      width: 24px; height: 24px; padding: 0; cursor: pointer;
+      border: 1px solid var(--border-2); background: none;
+    }
+    .hidden { display: none !important; }
     .method-desc {
       font-size: 9px;
       color: var(--text-mute);
@@ -412,6 +439,74 @@
       </div>
     </div>
 
+    <div class="section">
+      <div class="section-label">MURAL CANVAS</div>
+      <div class="ctl-row">
+        <div class="ctl-lbl">ASPECT — W:H (blank = source)</div>
+        <input type="text" class="tin" id="m-aspect" placeholder="e.g. 2:1">
+      </div>
+      <div class="ctl-row duo">
+        <div>
+          <div class="ctl-lbl">FIT</div>
+          <select class="select" id="m-fit">
+            <option value="contain" selected>CONTAIN</option>
+            <option value="cover">COVER</option>
+          </select>
+        </div>
+        <div>
+          <div class="ctl-lbl">MARGIN</div>
+          <select class="select" id="m-margin">
+            <option value="light" selected>LIGHT</option>
+            <option value="mean">MEAN</option>
+            <option value="dark">DARK</option>
+            <option value="edge">EDGE</option>
+          </select>
+        </div>
+      </div>
+      <div class="slider-row" style="margin-top:8px">
+        <div class="slider-head"><span class="name">DETAIL</span><span class="val" id="v-detail">800</span></div>
+        <input type="range" id="m-detail" min="400" max="2400" step="100" value="800">
+      </div>
+      <div class="ctl-row duo" style="margin-top:8px">
+        <div>
+          <div class="ctl-lbl">WALL W</div>
+          <input type="text" class="tin" id="m-wallw" placeholder="84">
+        </div>
+        <div>
+          <div class="ctl-lbl">WALL H</div>
+          <input type="text" class="tin" id="m-wallh" placeholder="42">
+        </div>
+        <div>
+          <div class="ctl-lbl">UNITS</div>
+          <select class="select" id="m-units">
+            <option value="in" selected>IN</option>
+            <option value="cm">CM</option>
+            <option value="mm">MM</option>
+          </select>
+        </div>
+      </div>
+      <div class="method-desc">Wall W×H stamps physical print size on the SVG; if ASPECT is blank it also sets the canvas shape. DETAIL is the processing grid (raise for big prints).</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">COLOR</div>
+      <div class="ctl-row">
+        <div class="ctl-lbl">MODE</div>
+        <select class="select" id="c-mode">
+          <option value="off" selected>OFF — single black ink</option>
+          <option value="tone">TONE — duotone by darkness</option>
+          <option value="depth">DEPTH — elevation ramp</option>
+        </select>
+      </div>
+      <div class="ctl-row hidden" id="c-opts">
+        <div class="slider-row">
+          <div class="slider-head"><span class="name">COLORS</span><span class="val" id="v-ccount">2</span></div>
+          <input type="range" id="c-count" min="2" max="6" step="1" value="2">
+        </div>
+        <div class="swatches" id="c-swatches"></div>
+      </div>
+    </div>
+
     <div class="section adv" id="adv-section">
       <div class="adv-head" id="adv-toggle">
         <span class="section-label" style="margin: 0;">ADVANCED</span>
@@ -499,12 +594,17 @@
     exportH: 0,
     seedX: null,
     seedY: null,
+    seedExplicit: false,   // true once the user clicks; else the server centers
+    subjectRect: null,     // {x,y,w,h} of the photo within a mural canvas, else null
     lastSvg: null,
     ghostImg: null,
     titleSlug: 'Untitled',
     exportCount: 0,
     view: { bounds: false, seed: true, ghost: true },
   };
+
+  // Default pen ramp (dark -> light) — mirrors engine/color.py DEFAULT_PALETTE.
+  const DEFAULT_PALETTE = ['#10202b', '#2a6f8f', '#5fb0a6', '#e3b23c', '#d9692b', '#a8324a'];
 
   // ---------- DOM refs ----------
   const drop = $('drop');
@@ -542,6 +642,13 @@
         tFit = $('t-fit'), tHome = $('t-home');
   const advSection = $('adv-section'), advToggle = $('adv-toggle');
 
+  // Mural + color controls.
+  const mAspect = $('m-aspect'), mFit = $('m-fit'), mMargin = $('m-margin'),
+        mDetail = $('m-detail'), vDetail = $('v-detail'),
+        mWallW = $('m-wallw'), mWallH = $('m-wallh'), mUnits = $('m-units');
+  const cMode = $('c-mode'), cOpts = $('c-opts'), cCount = $('c-count'),
+        vCcount = $('v-ccount'), cSwatches = $('c-swatches');
+
   const statPaths = $('st-paths'), statPoints = $('st-points'),
         statLevels = $('st-levels'), statSegs = $('st-segs'),
         statGrid = $('st-grid'), statTrng = $('st-trng');
@@ -567,6 +674,36 @@
   bindSlider(sSmooth, vSmooth, 2);
   bindSlider(sLum, vLum, 2);
   bindSlider(sWt, vWt, 2);
+  bindSlider(mDetail, vDetail, 0);
+  bindSlider(cCount, vCcount, 0);
+
+  // ---------- Mural + color controls ----------
+  function currentSwatchColors() {
+    return Array.from(cSwatches.querySelectorAll('input')).map(i => i.value);
+  }
+  function renderSwatches() {
+    const n = parseInt(cCount.value, 10);
+    const prev = currentSwatchColors();
+    cSwatches.innerHTML = '';
+    for (let i = 0; i < n; i++) {
+      const inp = document.createElement('input');
+      inp.type = 'color';
+      inp.className = 'swatch';
+      inp.value = prev[i] || DEFAULT_PALETTE[i % DEFAULT_PALETTE.length];
+      inp.addEventListener('input', scheduleRender);
+      cSwatches.appendChild(inp);
+    }
+  }
+  function syncColorUI() { cOpts.classList.toggle('hidden', cMode.value === 'off'); }
+  cMode.addEventListener('change', () => { syncColorUI(); scheduleRender(); });
+  cCount.addEventListener('input', () => { renderSwatches(); scheduleRender(); });
+  renderSwatches();
+  syncColorUI();
+
+  // Live re-render on mural control changes.
+  [mAspect, mWallW, mWallH].forEach(el => el.addEventListener('input', scheduleRender));
+  [mFit, mMargin, mUnits].forEach(el => el.addEventListener('change', scheduleRender));
+  mDetail.addEventListener('input', scheduleRender);
 
   // ---------- Dynamic per-method knobs (driven by /config) ----------
   function knobLabel(field) {
@@ -662,7 +799,14 @@
     if (!t) return;
     ctx.save();
     ctx.globalAlpha = 0.12;
-    ctx.drawImage(state.ghostImg, t.ox, t.oy, t.dispW, t.dispH);
+    const r = state.subjectRect;
+    if (r) {
+      // Mural canvas: draw the photo only in its sub-rect; margins are field-only.
+      ctx.drawImage(state.ghostImg,
+        t.ox + r.x * t.scale, t.oy + r.y * t.scale, r.w * t.scale, r.h * t.scale);
+    } else {
+      ctx.drawImage(state.ghostImg, t.ox, t.oy, t.dispW, t.dispH);
+    }
     ctx.restore();
   }
 
@@ -674,7 +818,13 @@
     ctx.strokeStyle = 'rgba(0, 255, 136, 0.55)';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
-    ctx.strokeRect(t.ox + 0.5, t.oy + 0.5, t.dispW - 1, t.dispH - 1);
+    ctx.strokeRect(t.ox + 0.5, t.oy + 0.5, t.dispW - 1, t.dispH - 1);  // full canvas
+    const r = state.subjectRect;
+    if (r) {  // subject placement within the mural canvas
+      ctx.strokeStyle = 'rgba(255, 190, 60, 0.7)';
+      ctx.strokeRect(t.ox + r.x * t.scale + 0.5, t.oy + r.y * t.scale + 0.5,
+        r.w * t.scale - 1, r.h * t.scale - 1);
+    }
     ctx.restore();
   }
 
@@ -754,6 +904,8 @@
         state.imgH = j.height;
         state.exportW = 0;
         state.exportH = 0;
+        state.subjectRect = null;
+        state.seedExplicit = false;   // a fresh image re-centers on the server
         state.seedX = Math.floor(j.width / 2);
         state.seedY = Math.floor(j.height / 2);
         updateSeedDisp();
@@ -827,6 +979,7 @@
     if (ix < 0 || iy < 0 || ix >= state.imgW || iy >= state.imgH) return;
     state.seedX = ix;
     state.seedY = iy;
+    state.seedExplicit = true;   // user placed it — send it (in canvas space)
     updateSeedDisp();
     redraw();
     scheduleRender();   // re-render with the new seed
@@ -845,10 +998,12 @@
 
   bReset.addEventListener('click', () => {
     if (!state.imgW) return;
+    state.seedExplicit = false;   // back to server-centered (canvas-aware)
     state.seedX = Math.floor(state.imgW / 2);
     state.seedY = Math.floor(state.imgH / 2);
     updateSeedDisp();
     redraw();
+    scheduleRender();
   });
 
   // ---------- Compute (shared by the COMPUTE button + live auto-render) ----------
@@ -870,10 +1025,36 @@
     fd.append('smooth', sSmooth.value);
     fd.append('lum_mix', sLum.value);
     fd.append('wt_range', sWt.value);
-    if (state.seedX != null) fd.append('seed_x', state.seedX);
-    if (state.seedY != null) fd.append('seed_y', state.seedY);
+    // Only send the seed once the user has explicitly placed one; otherwise let
+    // the server center on the (possibly mural-wide) processing grid.
+    if (state.seedExplicit && state.seedX != null) {
+      fd.append('seed_x', state.seedX);
+      fd.append('seed_y', state.seedY);
+    }
     // Active method's tuning knobs.
     Object.entries(curKnobInputs).forEach(([field, input]) => fd.append(field, input.value));
+
+    // Mural canvas: explicit ASPECT wins; else fall back to WALL W:H if both set.
+    const aspectRaw = mAspect.value.trim();
+    const wallW = mWallW.value.trim(), wallH = mWallH.value.trim();
+    const canvasAspect = aspectRaw || ((wallW && wallH) ? `${wallW}:${wallH}` : '');
+    if (canvasAspect) {
+      fd.append('canvas_aspect', canvasAspect);
+      fd.append('canvas_fit', mFit.value);
+      fd.append('margin_fill', mMargin.value);
+    }
+    fd.append('detail_px', mDetail.value);
+    if (wallW && wallH) {
+      fd.append('phys_width', wallW);
+      fd.append('phys_height', wallH);
+      fd.append('phys_units', mUnits.value);
+    }
+    // Color layers.
+    if (cMode.value !== 'off') {
+      fd.append('color_mode', cMode.value);
+      fd.append('n_colors', cCount.value);
+      fd.append('palette', currentSwatchColors().join(','));
+    }
 
     bCompute.disabled = true;
     bCompute.textContent = 'COMPUTING...';
@@ -894,6 +1075,7 @@
         state.exportH = j.img_height;
         state.imgW = j.processing_width || state.imgW || j.img_width;
         state.imgH = j.processing_height || state.imgH || j.img_height;
+        state.subjectRect = j.subject_rect || null;
         state.seedX = j.seed_x;
         state.seedY = j.seed_y;
         updateSeedDisp();

@@ -27,8 +27,9 @@ Browser (templates/index.html)
    ▼
 app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    │
-   ├─ engine.field.load_and_preprocess   resize to MAX_DIM=800, keep original size
+   ├─ engine.field.load_and_preprocess   resize to MAX_DIM=800 (or per-request detail_px), keep original size
    ├─ engine.field.to_luminance          BT.601 luma
+   ├─ engine.compose.compose_canvas      OPT-IN: pad to a wide mural aspect, fill margins (canvas_aspect set)
    ├─ field construction (one of):
    │     march.build_march_field method=march (ACTIVE — fast marching, reciprocal cost; darks go solid)
    │     build_wave_field    method=wave     (parked — additive L1-diamond field; d_tone≈0)
@@ -37,10 +38,12 @@ app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    ├─ engine.contour.extract_contours    Marching Squares at power-spaced levels (T-max clip, min-pts)
    ├─ engine.smooth.resample_contours    fixed-step arclength resample (STUDIO "STEP")
    ├─ engine.smooth.smooth_contours      Chaikin corner-cutting
-   ├─ engine.contour.scale_contours      processing grid → original dimensions
+   ├─ engine.color.assign_layers         OPT-IN: tag each contour with a pen index (color_mode tone/depth)
+   ├─ engine.contour.scale_contours      processing grid → original/canvas dimensions
    └─ engine.export.contours_to_svg_string_fast   constant-ink SVG (modulation opt-in via wt_range)
+        └─ …_layered (color_mode≠off): one Inkscape pen layer per color; both writers stamp physical size if phys given
    ▼
-JSON { svg, stats, img/processing dims, seed } → browser renders + offers export
+JSON { svg, stats, img/processing dims, seed, subject_rect, color_mode, palette } → browser renders + offers export
 ```
 
 There is also `POST /thumbnail` (returns a base64 downscaled ghost overlay for
@@ -76,6 +79,13 @@ applies the per-image suggestion.
   black-box tuner) writes and the loop edits. `engine.march` exposes
   `current_params/apply_params/save_params/load_params` + `PARAM_BOUNDS` as the
   search surface; `app.py`'s per-request overrides still ride on top.
+- **Mural extensions are opt-in and CORE-preserving.** `engine/compose.py`
+  (wide canvas), `engine/color.py` (pen-layer separation), and
+  `engine/export.py:contours_to_svg_layered` + the `phys`/`detail_px` params
+  extend `/process` for large-format work. All default off: with no canvas aspect,
+  `color_mode=off`, and no `phys`, the output is the historical single-ink SVG at
+  source aspect (guarded by a defaults-unchanged regression test). See
+  `algorithm.md` → "Mural extensions" for the stages and parameter table.
 - **Active method is `march`** (`build_march_field`, fast marching with reciprocal cost) — what
   `render_tick.sh` renders and the loop tunes (`MARCH_*` knobs). `wave`
   (`build_wave_field`), `contour` (`build_field`) and `flow` are parked; leave them

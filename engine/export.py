@@ -5,6 +5,14 @@ Default is plotter ink: a CONSTANT full-opacity black stroke (~0.7 px on the
 processing grid), matching CONTOUR-V (STUDIO shows STROKE 0.70 with STROKE MOD
 off — a plotter has one pen). Weight/opacity modulation (thick/dark near seed,
 thin/faint far away) is OPT-IN via wt_range > 0, the STROKE MOD equivalent.
+
+Two opt-in mural extensions live here too (both leave the default single-ink path
+byte-for-byte unchanged):
+  - physical units: pass phys={'w','h','units'} to stamp real-world width/height
+    on the <svg> (viewBox stays in grid coords) so the file opens at wall size.
+  - layered color: contours_to_svg_layered emits one Inkscape pen layer per color
+    (assign_layers tags each contour with a 'layer' index) — the multi-pen plotter
+    workflow, and a duotone/elevation look for prints.
 """
 
 import svgwrite
@@ -37,6 +45,27 @@ def compute_stroke(normalized_t, wt_range):
     width = max(0.2, 1.4 - normalized_t * wt_range * 1.2)
     opacity = max(0.35, 0.95 - normalized_t * 0.4 * wt_range)
     return round(width, 3), round(opacity, 3)
+
+
+def _fmt_phys(value):
+    """Format a physical dimension without a trailing '.0' for whole numbers."""
+    return f'{value:g}'
+
+
+def _svg_header(img_width, img_height, phys=None, extra_ns=''):
+    """Opening <svg> tag. viewBox is always grid coords; when phys is given
+    ({'w','h','units'}) the width/height carry real-world units so the document
+    opens at physical size. With phys=None the output is identical to the
+    historical single-ink header (the default path must stay byte-stable)."""
+    if phys:
+        u = phys.get('units', 'in')
+        wattr = f'{_fmt_phys(phys["w"])}{u}'
+        hattr = f'{_fmt_phys(phys["h"])}{u}'
+    else:
+        wattr, hattr = str(img_width), str(img_height)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg"{extra_ns} '
+            f'width="{wattr}" height="{hattr}" '
+            f'viewBox="0 0 {img_width} {img_height}">')
 
 
 def contours_to_svg(contours, img_width, img_height, wt_range=0.0, stroke_scale=1.0):
@@ -95,18 +124,18 @@ def contours_to_svg(contours, img_width, img_height, wt_range=0.0, stroke_scale=
 
 
 def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.0,
-                                stroke_scale=1.0):
+                                stroke_scale=1.0, phys=None):
     """
     Fast string-building SVG export (avoids svgwrite overhead for large path counts).
     Preferred for production use.
 
-    Args: same as contours_to_svg
+    Args: same as contours_to_svg, plus optional phys ({'w','h','units'}) to stamp
+        physical width/height on the document. phys=None reproduces the historical
+        single-ink output exactly.
     Returns: svg string
     """
     lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" '
-        f'width="{img_width}" height="{img_height}" '
-        f'viewBox="0 0 {img_width} {img_height}">',
+        _svg_header(img_width, img_height, phys),
         f'<rect width="{img_width}" height="{img_height}" fill="white"/>'
     ]
 
@@ -129,6 +158,63 @@ def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.0,
             f'stroke-width="{width}" '
             f'stroke-linecap="round" stroke-linejoin="round"/>'
         )
+
+    lines.append('</svg>')
+    return '\n'.join(lines)
+
+
+def contours_to_svg_layered(contours, img_width, img_height, palette,
+                            wt_range=0.0, stroke_scale=1.0, phys=None):
+    """
+    Layered SVG export: one Inkscape pen layer per color (mural color mode).
+
+    Each contour must carry an int 'layer' index (see engine.color.assign_layers);
+    layer i is drawn in palette[i % len(palette)] inside an Inkscape layer group
+    labelled "ink-i", so AxiDraw/Inkscape multi-pen plotting can plot one color,
+    swap the pen, and plot the next. Background stays white.
+
+    Args:
+        contours: list of dicts with 'points', 'normalized_t', and 'layer'
+        img_width/img_height: grid (viewBox) dimensions
+        palette: list of CSS colors, index == layer index
+        wt_range: stroke weight variation (0 = constant ink, the usual choice)
+        stroke_scale: original px per grid px
+        phys: optional {'w','h','units'} for physical document size
+
+    Returns: svg string
+    """
+    ns = (' xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"'
+          ' xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd"')
+    lines = [
+        _svg_header(img_width, img_height, phys, extra_ns=ns),
+        f'<rect width="{img_width}" height="{img_height}" fill="white"/>'
+    ]
+
+    by_layer = {}
+    for c in contours:
+        by_layer.setdefault(int(c.get('layer', 0)), []).append(c)
+
+    for layer_idx in sorted(by_layer):
+        color = palette[layer_idx % len(palette)] if palette else '#0a0a0f'
+        lines.append(
+            f'<g inkscape:groupmode="layer" inkscape:label="ink-{layer_idx}" '
+            f'fill="none" stroke="{color}" '
+            f'stroke-linecap="round" stroke-linejoin="round">'
+        )
+        for c in by_layer[layer_idx]:
+            pts = c['points']
+            if len(pts) < 2:
+                continue
+            width, opacity = compute_stroke(c['normalized_t'], wt_range)
+            width = round(width * stroke_scale, 3)
+            first = pts[0]
+            d = f'M{first[1]:.1f},{first[0]:.1f}'
+            d += ''.join(f'L{pt[1]:.1f},{pt[0]:.1f}' for pt in pts[1:])
+            attrs = f'stroke-width="{width}"'
+            if opacity != 1.0:
+                attrs += f' stroke-opacity="{opacity}"'
+            lines.append(f'<path d="{d}" {attrs}/>')
+        lines.append('</g>')
 
     lines.append('</svg>')
     return '\n'.join(lines)

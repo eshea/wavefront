@@ -10,6 +10,9 @@ from app import app
 from engine.contour import scale_contours
 from engine.field import MAX_DIM, load_and_preprocess
 from engine.march import PARAM_BOUNDS, suggest_params
+from engine.compose import compose_canvas, parse_aspect
+from engine.color import assign_layers, default_palette, DEFAULT_PALETTE
+from engine.export import (contours_to_svg_string_fast, contours_to_svg_layered)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -205,6 +208,172 @@ class AutotuneEndpointTests(unittest.TestCase):
         response = self.client.post('/autotune', data={},
                                     content_type='multipart/form-data')
         self.assertEqual(response.status_code, 400)
+
+
+def _contour(points, normalized_t=0.5, layer=None):
+    c = {'points': np.asarray(points, dtype=np.float32),
+         'threshold': 1.0, 'normalized_t': normalized_t}
+    if layer is not None:
+        c['layer'] = layer
+    return c
+
+
+class ParseAspectTests(unittest.TestCase):
+    def test_blank_and_none_mean_source_aspect(self):
+        self.assertIsNone(parse_aspect(None))
+        self.assertIsNone(parse_aspect(''))
+        self.assertIsNone(parse_aspect('   '))
+
+    def test_ratio_forms(self):
+        self.assertAlmostEqual(parse_aspect('2:1'), 2.0)
+        self.assertAlmostEqual(parse_aspect('7:3.5'), 2.0)
+        self.assertAlmostEqual(parse_aspect('84x42'), 2.0)
+        self.assertAlmostEqual(parse_aspect('3,2'), 1.5)
+        self.assertAlmostEqual(parse_aspect('1.85'), 1.85)
+
+    def test_malformed_and_nonpositive_raise(self):
+        for bad in ('abc', '0:1', '2:0', '-2:1', 'nan:1'):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    parse_aspect(bad)
+
+
+class ComposeCanvasTests(unittest.TestCase):
+    def setUp(self):
+        # Portrait subject (W=60, H=100), distinct mid value so margins stand out.
+        self.lum = np.full((100, 60), 120.0, dtype=np.float32)
+
+    def test_contain_widens_to_aspect_and_centers_subject(self):
+        canvas, (cw, ch), seed, rect = compose_canvas(self.lum, 2.0, fit='contain',
+                                                       margin_fill='light')
+        self.assertEqual((cw, ch), (200, 100))
+        self.assertAlmostEqual(cw / ch, 2.0)
+        self.assertEqual(rect, {'x': 70, 'y': 0, 'w': 60, 'h': 100})
+        # Default seed centers on the canvas.
+        self.assertEqual(seed, (100, 50))
+        # Margin filled light (255); subject region keeps its value.
+        self.assertEqual(canvas[50, 0], 255.0)
+        self.assertEqual(canvas[50, 100], 120.0)
+
+    def test_contain_remaps_explicit_seed_into_canvas(self):
+        _, _, seed, _ = compose_canvas(self.lum, 2.0, seed=(10, 20), fit='contain')
+        self.assertEqual(seed, (80, 20))   # x shifted by the left margin (70)
+
+    def test_margin_fill_values(self):
+        for fill, col0 in (('light', 255.0), ('dark', 0.0), ('mean', 120.0)):
+            with self.subTest(fill=fill):
+                canvas, _, _, _ = compose_canvas(self.lum, 2.0, margin_fill=fill)
+                self.assertEqual(canvas[50, 0], col0)
+
+    def test_cover_crops_to_aspect_without_margins(self):
+        canvas, (cw, ch), _, rect = compose_canvas(self.lum, 2.0, fit='cover')
+        self.assertEqual((cw, ch), (60, 30))
+        self.assertAlmostEqual(cw / ch, 2.0)
+        self.assertEqual(rect, {'x': 0, 'y': 0, 'w': 60, 'h': 30})
+        self.assertEqual(canvas.shape, (30, 60))
+
+
+class AssignLayersTests(unittest.TestCase):
+    def test_depth_bands_by_normalized_t(self):
+        cs = [_contour([[0, 0]], normalized_t=0.1),
+              _contour([[0, 0]], normalized_t=0.9)]
+        assign_layers(cs, 3, mode='depth')
+        self.assertEqual([c['layer'] for c in cs], [0, 2])
+
+    def test_tone_bands_dark_to_layer_zero(self):
+        gray = np.zeros((10, 10), dtype=np.float32)
+        gray[:, 5:] = 1.0                      # left dark, right light
+        dark = _contour([[5, 1], [5, 2]])
+        light = _contour([[5, 7], [5, 8]])
+        assign_layers([dark, light], 2, mode='tone', gray=gray)
+        self.assertEqual(dark['layer'], 0)
+        self.assertEqual(light['layer'], 1)
+
+    def test_single_color_all_layer_zero(self):
+        cs = [_contour([[0, 0]], normalized_t=0.9)]
+        assign_layers(cs, 1, mode='depth')
+        self.assertEqual(cs[0]['layer'], 0)
+
+    def test_default_palette_length(self):
+        self.assertEqual(len(default_palette(3)), 3)
+        self.assertEqual(default_palette(99), DEFAULT_PALETTE)
+
+
+class LayeredExportTests(unittest.TestCase):
+    def test_layered_emits_one_inkscape_layer_per_color(self):
+        cs = [_contour([[0, 0], [1, 1]], layer=0),
+              _contour([[2, 2], [3, 3]], layer=1)]
+        svg = contours_to_svg_layered(cs, 10, 10, ['#111111', '#dddddd'])
+        root = ElementTree.fromstring(svg)
+        ink = '{http://www.inkscape.org/namespaces/inkscape}'
+        layers = [g for g in root.iter('{http://www.w3.org/2000/svg}g')
+                  if g.attrib.get(ink + 'groupmode') == 'layer']
+        self.assertEqual(len(layers), 2)
+        self.assertEqual({g.attrib['stroke'] for g in layers},
+                         {'#111111', '#dddddd'})
+
+    def test_physical_units_on_both_writers(self):
+        cs = [_contour([[0, 0], [1, 1]], layer=0)]
+        phys = {'w': 84, 'h': 42, 'units': 'in'}
+        for svg in (contours_to_svg_string_fast(cs, 200, 100, phys=phys),
+                    contours_to_svg_layered(cs, 200, 100, ['#000'], phys=phys)):
+            root = ElementTree.fromstring(svg)
+            self.assertEqual(root.attrib['width'], '84in')
+            self.assertEqual(root.attrib['height'], '42in')
+            self.assertEqual(root.attrib['viewBox'], '0 0 200 100')
+
+    def test_default_fast_header_is_byte_stable(self):
+        # The CORE single-ink path must not drift when phys is absent.
+        cs = [_contour([[0, 0], [1, 1]])]
+        svg = contours_to_svg_string_fast(cs, 320, 240)
+        self.assertTrue(svg.startswith(
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'width="320" height="240" viewBox="0 0 320 240">'))
+
+
+class MuralEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def _post(self, **fields):
+        data = {'image': (image_bytes(size=(120, 160)), 'tiny.png')}
+        data.update(fields)
+        return self.client.post('/process', data=data,
+                                content_type='multipart/form-data')
+
+    def test_defaults_unchanged_core_regression(self):
+        payload = self._post().get_json()
+        self.assertIsNone(payload['subject_rect'])
+        self.assertEqual(payload['color_mode'], 'off')
+        self.assertIsNone(payload['palette'])
+        root = ElementTree.fromstring(payload['svg'])
+        # No physical units, no inkscape layers on the default path.
+        self.assertEqual(root.attrib['width'], str(payload['img_width']))
+        self.assertNotIn('inkscape', payload['svg'])
+
+    def test_wide_canvas_widens_output_and_reports_subject_rect(self):
+        payload = self._post(canvas_aspect='2:1', margin_fill='light').get_json()
+        self.assertAlmostEqual(payload['img_width'] / payload['img_height'], 2.0,
+                               delta=0.02)
+        self.assertIsNotNone(payload['subject_rect'])
+        self.assertEqual(payload['subject_rect']['w'], 120)
+
+    def test_color_mode_emits_layers_and_palette(self):
+        payload = self._post(color_mode='depth', n_colors='4').get_json()
+        self.assertEqual(payload['color_mode'], 'depth')
+        self.assertEqual(len(payload['palette']), 4)
+        self.assertIn('inkscape:groupmode', payload['svg'])
+
+    def test_physical_size_in_export(self):
+        payload = self._post(phys_width='84', phys_height='42',
+                             phys_units='in').get_json()
+        root = ElementTree.fromstring(payload['svg'])
+        self.assertEqual(root.attrib['width'], '84in')
+
+    def test_bad_canvas_aspect_returns_400(self):
+        resp = self._post(canvas_aspect='not-an-aspect')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('canvas_aspect', resp.get_json()['error'])
 
 
 if __name__ == '__main__':

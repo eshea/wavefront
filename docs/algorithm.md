@@ -36,7 +36,9 @@ end, not the canonical path.
 
   1. Record the original upload dimensions.
 
-  2. Resize a processing copy to max 640px on the longest side.
+  2. Resize a processing copy to a capped longest side (`MAX_DIM` = 800 by
+     default; a request may raise it via `detail_px` for large prints — see
+     "Mural extensions" below).
      - Aspect ratio is preserved.
      - The capped grid keeps contour extraction fast.
      - Original dimensions are retained for final SVG export.
@@ -188,6 +190,39 @@ end, not the canonical path.
   - Path coordinates use `M x0,y0 L x1,y1 ...`.
   - Strokes use round caps and joins.
 
+## Mural extensions (opt-in; absent ⇒ CORE behavior)
+
+CORE renders at the source aspect in single black ink. For large wall murals three
+opt-in stages extend the pipeline without changing any default. They are confined
+to `app.py:/process` plus `engine/compose.py`, `engine/color.py`, and the layered
+writer in `engine/export.py`; the field/contour/smooth core is untouched.
+
+- **Wide canvas (`engine/compose.py:compose_canvas`).** When `canvas_aspect`
+  (e.g. `2:1`, or derived from `phys_width:phys_height`) is given, the luminance
+  grid is padded into that target aspect *before* field construction. `fit=contain`
+  (default) letterboxes the whole subject and fills the margins (`margin_fill`:
+  `light`/`mean`/`dark`/`edge`); `fit=cover` center-crops to the aspect. The seed
+  defaults to the canvas center and the field radiates across the full canvas, so
+  the margins read as the field's continuation of the subject. Export happens at the
+  canvas size (vector — physical size is set separately). Returns a `subject_rect`
+  so the UI can show where the photo sits inside the frame.
+  - Aesthetic note: with the reciprocal `march` field a `light` margin is *fast*
+    (sparse, minimal); `dark`/`mean` margins, the `wave` field, or **color depth
+    mode** are what make nested diamonds visibly fill the margins.
+- **Color layers (`engine/color.py:assign_layers`).** With `color_mode=tone` each
+  contour is banded by the image's local darkness sampled along it (shadows →
+  darkest pen); `color_mode=depth` bands by `normalized_t` (concentric color zones
+  radiating from the seed — the hypsometric/elevation look). `n_colors` (1–6) and an
+  optional `palette` drive the export. Assignment runs on the processing grid before
+  scaling, so the `layer` index survives the scale-to-export step.
+- **Layered SVG + physical size (`engine/export.py`).**
+  `contours_to_svg_layered` emits one Inkscape pen layer (`<g inkscape:groupmode=
+  "layer">`) per color — the multi-pen plot workflow. Passing `phys`
+  (`phys_width`/`phys_height`/`phys_units`) stamps real-world width/height on the
+  `<svg>` (viewBox stays in grid coords) so the file opens at wall size in
+  Inkscape or a print shop with no manual rescale. With `phys` absent and
+  `color_mode=off`, the single-ink output is byte-for-byte the historical SVG.
+
 ## API Parameter Ranges
 
 | Parameter | Range | Default | Notes |
@@ -196,9 +231,18 @@ end, not the canonical path.
 | smooth | 0-1 | 0.00 | Mapped to 0-4 Chaikin iterations. |
 | lum_mix | 0-2 | 0.8 | Strength of luminance warping. |
 | wt_range | 0-1 | 0.0 | Stroke width variation. |
-| seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid. |
+| seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid (canvas grid when a canvas aspect is set). |
 | method | contour/wave/flow/march | march | API + UI default — the canonical "woman output" (fast-marching reciprocal cost), matching `render_tick.sh`. |
 | diamond | 0-1 | 0.0 | `wave` only — maps to `WAVE_DIAMOND` if sent. |
+| detail_px | 400-2400 | `MAX_DIM` (800) | Processing-grid longest side; raise for large prints (only matters when the source exceeds the cap). |
+| canvas_aspect | `W:H` / ratio | blank = source | Mural canvas target aspect (`engine/compose.py`). |
+| canvas_fit | contain/cover | contain | Letterbox vs center-crop. |
+| margin_fill | light/mean/dark/edge | light | Tone filling the letterbox margins. |
+| color_mode | off/tone/depth | off | Pen-layer separation; off = single black ink. |
+| n_colors | 1-6 | 2 | Number of pen layers when color is on. |
+| palette | CSS colors | default ramp | Per-layer colors (index = layer). |
+| phys_width/phys_height | > 0 | none | Physical export size; stamps real units on the SVG. |
+| phys_units | in/cm/mm | in | Units for the physical size. |
 
 ## The active field: method=march (fast marching, reciprocal cost)
 

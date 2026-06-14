@@ -20,9 +20,11 @@ import engine.march as em
 from engine.field import load_and_preprocess, to_luminance, build_field, build_wave_field
 from engine.contour import extract_contours, scale_contours
 from engine.smooth import resample_contours, smooth_contours
-from engine.export import contours_to_svg_string_fast
+from engine.export import contours_to_svg_string_fast, contours_to_svg_layered
 from engine.flow import trace_flow_lines
 from engine.march import build_march_field
+from engine.compose import compose_canvas, parse_aspect, MARGIN_FILLS
+from engine.color import assign_layers, default_palette
 
 METHODS = ('contour', 'wave', 'flow', 'march')  # contour = classic isolines (default)
 
@@ -155,6 +157,44 @@ def _parse_optional_int_param(name):
         raise RequestValidationError(f'{name} must be an integer') from exc
 
 
+def _parse_optional_float_param(name, min_value=None):
+    """Parse an optional positive-ish float form field. None when absent; raises
+    RequestValidationError on a present-but-malformed value."""
+    raw = request.form.get(name)
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if raw == '':
+        return None
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RequestValidationError(f'{name} must be a number') from exc
+    if not math.isfinite(value):
+        raise RequestValidationError(f'{name} must be a finite number')
+    if min_value is not None and value < min_value:
+        raise RequestValidationError(f'{name} must be >= {min_value}')
+    return value
+
+
+def _parse_palette(raw, n_colors):
+    """Comma/space-separated CSS colors -> list. Falls back to the default ramp.
+    Pads to n_colors by repeating the default so a layer always has a color."""
+    colors = []
+    if raw:
+        for tok in raw.replace(' ', ',').split(','):
+            tok = tok.strip()
+            if tok:
+                colors.append(tok if tok.startswith('#') else f'#{tok}')
+    base = default_palette(n_colors)
+    if not colors:
+        return base
+    # Keep user colors; backfill any shortfall from the default ramp.
+    for i in range(len(colors), n_colors):
+        colors.append(base[i % len(base)])
+    return colors[:n_colors]
+
+
 def _required_image_file():
     if 'image' not in request.files:
         raise RequestValidationError('No image provided')
@@ -223,15 +263,52 @@ def process():
         if method not in METHODS:
             method = 'march'
 
+        # --- mural extensions (all opt-in; absent => CORE behavior) ---
+        detail_px = _parse_int_param('detail_px', ef.MAX_DIM, 400, 2400)
+        canvas_fit = (request.form.get('canvas_fit') or 'contain').strip().lower()
+        if canvas_fit not in ('contain', 'cover'):
+            canvas_fit = 'contain'
+        margin_fill = (request.form.get('margin_fill') or 'light').strip().lower()
+        if margin_fill not in MARGIN_FILLS:
+            margin_fill = 'light'
         try:
-            rgb_array, original_size, processed_size = load_and_preprocess(image_file)
+            canvas_aspect = parse_aspect(request.form.get('canvas_aspect'))
+        except ValueError as exc:
+            raise RequestValidationError('canvas_aspect must look like "2:1"') from exc
+        color_mode = (request.form.get('color_mode') or 'off').strip().lower()
+        if color_mode not in ('off', 'tone', 'depth'):
+            color_mode = 'off'
+        n_colors = _parse_int_param('n_colors', 2, 1, 6)
+        palette = _parse_palette(request.form.get('palette'), n_colors)
+        phys_w = _parse_optional_float_param('phys_width', min_value=0.0)
+        phys_h = _parse_optional_float_param('phys_height', min_value=0.0)
+        phys_units = (request.form.get('phys_units') or 'in').strip().lower()
+        if phys_units not in ('in', 'mm', 'cm'):
+            phys_units = 'in'
+        phys = ({'w': phys_w, 'h': phys_h, 'units': phys_units}
+                if (phys_w and phys_h) else None)
+
+        try:
+            rgb_array, original_size, processed_size = load_and_preprocess(
+                image_file, max_dim=detail_px)
         except (UnidentifiedImageError, OSError) as exc:
             raise RequestValidationError('Invalid or corrupt image data') from exc
 
-        orig_w, orig_h = original_size
-        img_w, img_h = processed_size
         luminance = to_luminance(rgb_array)
 
+        # Mural canvas: pad the subject into a wide target aspect; the diamond field
+        # fills the margins. Export at the canvas size (vector — phys sets print size).
+        subject_rect = None
+        if canvas_aspect is not None:
+            luminance, processed_size, _, subject_rect = compose_canvas(
+                luminance, canvas_aspect, seed=None, fit=canvas_fit,
+                margin_fill=margin_fill)
+            original_size = processed_size
+
+        orig_w, orig_h = original_size
+        img_w, img_h = processed_size
+
+        # Seed lives in processing-grid (canvas) space; default = grid center.
         sx = seed_x if seed_x is not None else img_w // 2
         sy = seed_y if seed_y is not None else img_h // 2
         sx = max(0, min(img_w - 1, sx))
@@ -261,13 +338,28 @@ def process():
 
         contours = smooth_contours(contours, smooth)
 
+        # Color layers (mural color mode): tag each contour with a pen index on the
+        # PROCESSING grid (so the tone reference and points share coordinates),
+        # before scaling to export space. 'layer' survives scale_contours.
+        if color_mode != 'off':
+            gray_ref = ((luminance / 255.0).astype('float32')
+                        if color_mode == 'tone' else None)
+            assign_layers(contours, n_colors, mode=color_mode, gray=gray_ref)
+
         total_pts = sum(len(c['points']) for c in contours)
         stats['total_points'] = total_pts
         stats['segments'] = max(total_pts - stats['paths'], 0)
 
         export_contours = scale_contours(contours, processed_size, original_size)
-        svg_string = contours_to_svg_string_fast(export_contours, orig_w, orig_h, wt_range,
-                                                 stroke_scale=orig_w / img_w)
+        stroke_scale = orig_w / img_w
+        if color_mode != 'off':
+            svg_string = contours_to_svg_layered(
+                export_contours, orig_w, orig_h, palette,
+                wt_range=wt_range, stroke_scale=stroke_scale, phys=phys)
+        else:
+            svg_string = contours_to_svg_string_fast(
+                export_contours, orig_w, orig_h, wt_range,
+                stroke_scale=stroke_scale, phys=phys)
 
         return jsonify({
             'svg': svg_string,
@@ -277,7 +369,10 @@ def process():
             'processing_width': img_w,
             'processing_height': img_h,
             'seed_x': sx,
-            'seed_y': sy
+            'seed_y': sy,
+            'subject_rect': subject_rect,
+            'color_mode': color_mode,
+            'palette': palette if color_mode != 'off' else None
         })
 
     except RequestValidationError as e:
