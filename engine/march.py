@@ -209,9 +209,13 @@ def build_march_field(luminance, seed_x, seed_y, lum_mix=1.0):
     # semantics in the other methods. Strictly positive, so MCP's geodesic is
     # well-defined.
     speed = np.clip(gray, MARCH_FLOOR, 1.0)
+    # float32 (not float64): this is the heaviest array in the pipeline and the
+    # single biggest peak-memory term for large mural grids. MCP accepts float32
+    # and `cumulative` is downcast to float32 below anyway, so the geodesic is
+    # numerically unchanged for our purposes while the footprint halves.
     cost = (MARCH_BASE
             + float(lum_mix) * (1.0 / speed - 1.0)
-            + MARCH_EDGE * edge).astype(np.float64)
+            + MARCH_EDGE * edge).astype(np.float32)
 
     sy = int(np.clip(seed_y, 0, H - 1))
     sx = int(np.clip(seed_x, 0, W - 1))
