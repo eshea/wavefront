@@ -465,7 +465,7 @@
       </div>
       <div class="slider-row" style="margin-top:8px">
         <div class="slider-head"><span class="name">DETAIL</span><span class="val" id="v-detail">800</span></div>
-        <input type="range" id="m-detail" min="400" max="2400" step="100" value="800">
+        <input type="range" id="m-detail" min="400" max="4000" step="100" value="800">
       </div>
       <div class="ctl-row duo" style="margin-top:8px">
         <div>
@@ -485,7 +485,18 @@
           </select>
         </div>
       </div>
-      <div class="method-desc">Wall W×H stamps physical print size on the SVG; if ASPECT is blank it also sets the canvas shape. DETAIL is the processing grid (raise for big prints).</div>
+      <div class="ctl-row duo" style="margin-top:8px">
+        <div>
+          <div class="ctl-lbl">PEN (mm)</div>
+          <input type="text" class="tin" id="m-pen" placeholder="—">
+        </div>
+        <div>
+          <div class="ctl-lbl">SIMPLIFY (mm)</div>
+          <input type="text" class="tin" id="m-simplify" placeholder="—">
+        </div>
+      </div>
+      <div class="method-desc" id="print-readout"></div>
+      <div class="method-desc">Wall W×H stamps physical print size on the SVG; if ASPECT is blank it also sets the canvas shape. DETAIL is the processing grid (raise for big prints). PEN draws a fixed physical stroke; SIMPLIFY drops redundant points to keep big files plotter-friendly.</div>
     </div>
 
     <div class="section">
@@ -645,7 +656,8 @@
   // Mural + color controls.
   const mAspect = $('m-aspect'), mFit = $('m-fit'), mMargin = $('m-margin'),
         mDetail = $('m-detail'), vDetail = $('v-detail'),
-        mWallW = $('m-wallw'), mWallH = $('m-wallh'), mUnits = $('m-units');
+        mWallW = $('m-wallw'), mWallH = $('m-wallh'), mUnits = $('m-units'),
+        mPen = $('m-pen'), mSimplify = $('m-simplify'), printReadout = $('print-readout');
   const cMode = $('c-mode'), cOpts = $('c-opts'), cCount = $('c-count'),
         vCcount = $('v-ccount'), cSwatches = $('c-swatches');
 
@@ -701,9 +713,11 @@
   syncColorUI();
 
   // Live re-render on mural control changes.
-  [mAspect, mWallW, mWallH].forEach(el => el.addEventListener('input', scheduleRender));
-  [mFit, mMargin, mUnits].forEach(el => el.addEventListener('change', scheduleRender));
-  mDetail.addEventListener('input', scheduleRender);
+  [mAspect, mWallW, mWallH, mPen, mSimplify].forEach(
+    el => el.addEventListener('input', () => { updatePrintReadout(); scheduleRender(); }));
+  [mFit, mMargin, mUnits].forEach(
+    el => el.addEventListener('change', () => { updatePrintReadout(); scheduleRender(); }));
+  mDetail.addEventListener('input', () => { updatePrintReadout(); scheduleRender(); });
 
   // ---------- Dynamic per-method knobs (driven by /config) ----------
   function knobLabel(field) {
@@ -1049,6 +1063,8 @@
       fd.append('phys_height', wallH);
       fd.append('phys_units', mUnits.value);
     }
+    if (mPen.value.trim()) fd.append('pen_mm', mPen.value.trim());
+    if (mSimplify.value.trim()) fd.append('simplify_mm', mSimplify.value.trim());
     // Color layers.
     if (cMode.value !== 'off') {
       fd.append('color_mode', cMode.value);
@@ -1175,6 +1191,43 @@
     statTrng.textContent = `${s.t_min}…${s.t_max}`;
     botLeft.textContent =
       `LEVELS ${s.levels} | SEGS ${segments.toLocaleString()} | CHAINS ${s.paths} | PTS ${s.total_points.toLocaleString()}`;
+    state.lastPoints = s.total_points || 0;
+    updatePrintReadout();
+  }
+
+  // Print-size guidance: physical line spacing, pen-vs-detail sanity, aspect
+  // mismatch, and a point-budget warning — so the user can judge a large print
+  // before committing to a slow render. Pure derived math; no engine round-trip.
+  function updatePrintReadout() {
+    if (!printReadout) return;
+    const wallW = parseFloat(mWallW.value), wallH = parseFloat(mWallH.value);
+    const parts = [];
+    let warn = false;
+    // Aspect mismatch (only matters when ASPECT isn't explicitly overriding shape).
+    if (wallW > 0 && wallH > 0 && state.imgW && state.imgH && !mAspect.value.trim()) {
+      const wallAR = wallW / wallH, imgAR = state.imgW / state.imgH;
+      if (Math.abs(wallAR - imgAR) / imgAR > 0.02) {
+        parts.push(`⚠ WALL aspect ${wallAR.toFixed(2)} ≠ image ${imgAR.toFixed(2)} — set ASPECT or the print distorts`);
+        warn = true;
+      }
+    }
+    const gridW = state.imgW || parseInt(mDetail.value, 10);
+    if (wallW > 0 && gridW) {
+      const mmPerUnit = { in: 25.4, cm: 10, mm: 1 }[mUnits.value] || 25.4;
+      const spacing = (wallW * mmPerUnit) / gridW;   // mm per grid px ≈ finest detail
+      parts.push(`≈ ${spacing.toFixed(2)}mm finest detail @ ${wallW}${mUnits.value}`);
+      const pen = parseFloat(mPen.value);
+      if (pen > 0 && pen > spacing * 1.5) {
+        parts.push(`⚠ PEN ${pen}mm > detail — lines may blob; raise DETAIL or thin the pen`);
+        warn = true;
+      }
+    }
+    if (state.lastPoints > 800000) {
+      parts.push(`⚠ ${state.lastPoints.toLocaleString()} pts — heavy for editors/plotters; raise SIMPLIFY`);
+      warn = true;
+    }
+    printReadout.textContent = parts.join('   ·   ');
+    printReadout.style.color = warn ? '#d9a441' : '';
   }
 
   // ---------- Export ----------
@@ -1229,9 +1282,21 @@
     const url = URL.createObjectURL(blob);
     const img = new Image();
     img.onload = () => {
+      // The PNG is a raster preview; the SVG is the real print deliverable. Cap
+      // the raster's longest side so a wall-size export doesn't allocate hundreds
+      // of MP of RGBA and OOM the tab (clamp preserves aspect; vector stays full).
+      const PNG_MAX_SIDE = 4000;
+      let w = state.exportW || state.imgW, h = state.exportH || state.imgH;
+      const longest = Math.max(w, h);
+      let clamped = false;
+      if (longest > PNG_MAX_SIDE) {
+        const k = PNG_MAX_SIDE / longest;
+        w = Math.round(w * k); h = Math.round(h * k);
+        clamped = true;
+      }
       const c = document.createElement('canvas');
-      c.width = state.exportW || state.imgW;
-      c.height = state.exportH || state.imgH;
+      c.width = w;
+      c.height = h;
       const cx = c.getContext('2d');
       cx.fillStyle = '#fff';
       cx.fillRect(0, 0, c.width, c.height);
@@ -1241,7 +1306,8 @@
         if (!png) { setStatus('PNG ENCODE FAILED', 'err'); return; }
         const fn = nextFilename('png');
         downloadBlob(png, fn);
-        setStatus(`PNG → ${fn}`, 'ok');
+        setStatus(clamped ? `PNG → ${fn} (raster capped ${w}×${h}; use SVG for full size)`
+                          : `PNG → ${fn}`, 'ok');
       }, 'image/png');
     };
     img.onerror = () => {

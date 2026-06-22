@@ -19,8 +19,9 @@ import engine.flow as efl
 import engine.march as em
 from engine.field import load_and_preprocess, to_luminance, build_field, build_wave_field
 from engine.contour import extract_contours, scale_contours
-from engine.smooth import resample_contours, smooth_contours
-from engine.export import contours_to_svg_string_fast, contours_to_svg_layered
+from engine.smooth import resample_contours, smooth_contours, decimate_contours
+from engine.export import (contours_to_svg_string_fast, contours_to_svg_layered,
+                           UNITS_TO_MM)
 from engine.flow import trace_flow_lines
 from engine.march import build_march_field
 from engine.compose import compose_canvas, parse_aspect, MARGIN_FILLS
@@ -103,6 +104,13 @@ def _apply_knobs(method):
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max upload
+
+# Largest processing grid (width*height, px) a single render may attempt. The
+# march field is one global geodesic solve that cannot be tiled, so peak memory
+# (cost + meshgrid + MCP scratch) scales with grid area; this guard returns a
+# clean 400 instead of letting a big DETAIL × wide-canvas combination OOM the
+# host. Default sized for a modest homelab box (~4000² square); override via env.
+MAX_GRID_PX = int(os.environ.get('MAX_GRID_PX', 16_000_000))
 
 
 class RequestValidationError(ValueError):
@@ -264,7 +272,9 @@ def process():
             method = 'march'
 
         # --- mural extensions (all opt-in; absent => CORE behavior) ---
-        detail_px = _parse_int_param('detail_px', ef.MAX_DIM, 400, 2400)
+        # Upper bound is the measured practical ceiling for one geodesic solve
+        # (~10s / ~1.4GB at 4000px); MAX_GRID_PX still backstops wide canvases.
+        detail_px = _parse_int_param('detail_px', ef.MAX_DIM, 400, 4000)
         canvas_fit = (request.form.get('canvas_fit') or 'contain').strip().lower()
         if canvas_fit not in ('contain', 'cover'):
             canvas_fit = 'contain'
@@ -287,6 +297,11 @@ def process():
             phys_units = 'in'
         phys = ({'w': phys_w, 'h': phys_h, 'units': phys_units}
                 if (phys_w and phys_h) else None)
+        # Plotter pen width (mm) — constant physical stroke, needs phys to resolve.
+        pen_mm = _parse_optional_float_param('pen_mm', min_value=0.0)
+        # Point-budget simplify tolerance (mm) — RDP decimation for big prints,
+        # converted to grid px below once the processing size is known.
+        simplify_mm = _parse_optional_float_param('simplify_mm', min_value=0.0)
 
         try:
             rgb_array, original_size, processed_size = load_and_preprocess(
@@ -307,6 +322,15 @@ def process():
 
         orig_w, orig_h = original_size
         img_w, img_h = processed_size
+
+        # Guard the heavy global geodesic solve: a large DETAIL × wide canvas can
+        # allocate gigabytes (cost + meshgrid + MCP scratch all scale with grid
+        # area). Reject cleanly instead of OOMing the (single-threaded) server.
+        if img_w * img_h > MAX_GRID_PX:
+            raise RequestValidationError(
+                f'Processing grid {img_w}×{img_h} ({img_w * img_h:,}px) exceeds '
+                f'the {MAX_GRID_PX:,}px limit — reduce DETAIL or canvas size '
+                f'(or raise MAX_GRID_PX on the server).')
 
         # Seed lives in processing-grid (canvas) space; default = grid center.
         sx = seed_x if seed_x is not None else img_w // 2
@@ -338,6 +362,13 @@ def process():
 
         contours = smooth_contours(contours, smooth)
 
+        # Point budget for big prints: RDP-decimate by a physical tolerance,
+        # converted to grid px from the print width (needs phys to be meaningful).
+        if simplify_mm and phys:
+            phys_w_mm = phys['w'] * UNITS_TO_MM.get(phys['units'], 25.4)
+            if phys_w_mm > 0:
+                contours = decimate_contours(contours, simplify_mm / phys_w_mm * img_w)
+
         # Color layers (mural color mode): tag each contour with a pen index on the
         # PROCESSING grid (so the tone reference and points share coordinates),
         # before scaling to export space. 'layer' survives scale_contours.
@@ -355,11 +386,11 @@ def process():
         if color_mode != 'off':
             svg_string = contours_to_svg_layered(
                 export_contours, orig_w, orig_h, palette,
-                wt_range=wt_range, stroke_scale=stroke_scale, phys=phys)
+                wt_range=wt_range, stroke_scale=stroke_scale, phys=phys, pen_mm=pen_mm)
         else:
             svg_string = contours_to_svg_string_fast(
                 export_contours, orig_w, orig_h, wt_range,
-                stroke_scale=stroke_scale, phys=phys)
+                stroke_scale=stroke_scale, phys=phys, pen_mm=pen_mm)
 
         return jsonify({
             'svg': svg_string,
@@ -452,4 +483,7 @@ if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', '').lower() in {'1', 'true', 'yes', 'on'}
     print('\n  WAVEFRONT — Topographic Contour Engine')
     print(f'  http://{host}:{port}\n')
-    app.run(debug=debug, host=host, port=port)
+    # threaded=True so a slow large-print render doesn't serialize every other
+    # request on the dev server (numpy/skimage release the GIL during the heavy
+    # solve). For real mural traffic, front this with gunicorn + a long --timeout.
+    app.run(debug=debug, host=host, port=port, threaded=True)

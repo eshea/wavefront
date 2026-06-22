@@ -74,6 +74,67 @@ def resample_contours(contours, step=None):
     return [{**c, 'points': resample_polyline(c['points'], step)} for c in contours]
 
 
+def rdp_polyline(points, epsilon):
+    """
+    Ramer–Douglas–Peucker decimation: drop interior points that lie within
+    `epsilon` (grid px) of the chord between their kept neighbours, preserving
+    overall shape and the exact endpoints. This is the point-budget lever for
+    large prints — Chaikin adds points on near-straight runs that a plotter and
+    vector editor don't need; RDP removes them without visible change.
+
+    Iterative (explicit stack) so a huge mural path can't blow the recursion
+    limit. epsilon <= 0 or paths shorter than 3 points are returned unchanged.
+
+    Args:
+        points: numpy array (N, 2) — polyline coordinates [row, col]
+        epsilon: float, max perpendicular deviation in grid px
+
+    Returns:
+        numpy array (M, 2) — decimated polyline (M <= N)
+    """
+    n = len(points)
+    if epsilon <= 0 or n < 3:
+        return points
+
+    pts = points.astype(np.float32)
+    keep = np.zeros(n, dtype=bool)
+    keep[0] = keep[-1] = True
+    eps2 = float(epsilon) * float(epsilon)
+    stack = [(0, n - 1)]
+    while stack:
+        i0, i1 = stack.pop()
+        if i1 <= i0 + 1:
+            continue
+        a, b = pts[i0], pts[i1]
+        ab = b - a
+        seg2 = float(ab[0] * ab[0] + ab[1] * ab[1])
+        rel = pts[i0 + 1:i1] - a
+        if seg2 <= 1e-12:
+            # Degenerate chord (closed loop start==end): use distance to point a.
+            d2 = rel[:, 0] ** 2 + rel[:, 1] ** 2
+        else:
+            cross = rel[:, 0] * ab[1] - rel[:, 1] * ab[0]
+            d2 = (cross * cross) / seg2
+        k = int(np.argmax(d2))
+        if float(d2[k]) > eps2:
+            idx = i0 + 1 + k
+            keep[idx] = True
+            stack.append((i0, idx))
+            stack.append((idx, i1))
+    return pts[keep]
+
+
+def decimate_contours(contours, epsilon):
+    """
+    RDP-decimate every contour path by `epsilon` grid px. epsilon <= 0 is a
+    no-op (returns the input list unchanged), so the default pipeline is byte
+    stable; callers opt in for big prints via a physical simplify tolerance.
+    """
+    if not epsilon or epsilon <= 0:
+        return contours
+    return [{**c, 'points': rdp_polyline(c['points'], epsilon)} for c in contours]
+
+
 def chaikin(points, iterations):
     """
     Apply Chaikin corner-cutting algorithm to a polyline.

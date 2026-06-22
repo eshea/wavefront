@@ -6,13 +6,16 @@ from xml.etree import ElementTree
 import numpy as np
 from PIL import Image
 
+import app as app_module
 from app import app
 from engine.contour import scale_contours
 from engine.field import MAX_DIM, load_and_preprocess
 from engine.march import PARAM_BOUNDS, suggest_params
 from engine.compose import compose_canvas, parse_aspect
 from engine.color import assign_layers, default_palette, DEFAULT_PALETTE
-from engine.export import (contours_to_svg_string_fast, contours_to_svg_layered)
+from engine.export import (contours_to_svg_string_fast, contours_to_svg_layered,
+                           _pen_stroke_vb, UNITS_TO_MM)
+from engine.smooth import rdp_polyline, decimate_contours
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -374,6 +377,70 @@ class MuralEndpointTests(unittest.TestCase):
         resp = self._post(canvas_aspect='not-an-aspect')
         self.assertEqual(resp.status_code, 400)
         self.assertIn('canvas_aspect', resp.get_json()['error'])
+
+    def test_oversized_grid_returns_400(self):
+        # Temporarily shrink the budget so any real grid trips the guard cleanly
+        # instead of allocating and OOMing.
+        prev = app_module.MAX_GRID_PX
+        app_module.MAX_GRID_PX = 5000
+        try:
+            resp = self._post(detail_px='400')
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn('exceeds', resp.get_json()['error'])
+        finally:
+            app_module.MAX_GRID_PX = prev
+
+    def test_pen_width_emits_constant_physical_stroke(self):
+        payload = self._post(phys_width='84', phys_height='112',
+                             phys_units='in', pen_mm='0.3').get_json()
+        root = ElementTree.fromstring(payload['svg'])
+        widths = {p.attrib['stroke-width']
+                  for p in root.iter('{http://www.w3.org/2000/svg}path')}
+        # One constant pen width (not the modulated/pixel-derived stroke).
+        self.assertEqual(len(widths), 1)
+        vb_w = payload['img_width']
+        expected = round(0.3 / (84 * 25.4) * vb_w, 4)
+        self.assertAlmostEqual(float(next(iter(widths))), expected, places=3)
+
+    def test_simplify_reduces_point_count(self):
+        base = self._post(phys_width='84', phys_height='112',
+                          phys_units='in').get_json()
+        thin = self._post(phys_width='84', phys_height='112',
+                          phys_units='in', simplify_mm='2.0').get_json()
+        self.assertLess(thin['stats']['total_points'],
+                        base['stats']['total_points'])
+
+
+class DecimateTests(unittest.TestCase):
+    def test_rdp_collapses_collinear_keeps_corners(self):
+        line = np.array([[0, i] for i in range(101)], dtype=np.float32)
+        self.assertEqual(len(rdp_polyline(line, 0.5)), 2)
+        corner = np.array([[0, 0], [0, 5], [3, 5], [3, 10]], dtype=np.float32)
+        self.assertEqual(len(rdp_polyline(corner, 0.1)), 4)
+
+    def test_rdp_endpoints_preserved(self):
+        line = np.array([[0, i] for i in range(101)], dtype=np.float32)
+        out = rdp_polyline(line, 0.5)
+        np.testing.assert_array_equal(out[0], line[0])
+        np.testing.assert_array_equal(out[-1], line[-1])
+
+    def test_decimate_noop_at_zero_epsilon(self):
+        cs = [_contour([[0, 0], [1, 1], [2, 2]])]
+        self.assertIs(decimate_contours(cs, 0), cs)
+
+
+class PenStrokeTests(unittest.TestCase):
+    def test_pen_none_without_phys(self):
+        self.assertIsNone(_pen_stroke_vb(0.3, None, 2400))
+        self.assertIsNone(_pen_stroke_vb(None, {'w': 84, 'units': 'in'}, 2400))
+        self.assertIsNone(_pen_stroke_vb(0.0, {'w': 84, 'units': 'in'}, 2400))
+
+    def test_pen_round_trips_to_physical_mm(self):
+        for units, factor in UNITS_TO_MM.items():
+            phys = {'w': 100, 'units': units}
+            vb = _pen_stroke_vb(0.5, phys, 2000)
+            back_mm = vb / 2000 * 100 * factor
+            self.assertAlmostEqual(back_mm, 0.5, places=3)
 
 
 if __name__ == '__main__':

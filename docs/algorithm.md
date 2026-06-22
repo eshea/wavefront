@@ -222,6 +222,39 @@ writer in `engine/export.py`; the field/contour/smooth core is untouched.
   `<svg>` (viewBox stays in grid coords) so the file opens at wall size in
   Inkscape or a print shop with no manual rescale. With `phys` absent and
   `color_mode=off`, the single-ink output is byte-for-byte the historical SVG.
+- **Physical pen width (`pen_mm`, `engine/export.py:_pen_stroke_vb`).** A plotter
+  has one pen of a real width (e.g. 0.3mm). When `pen_mm` and `phys` are both set
+  the stroke is computed in viewBox units so it renders at exactly that width on
+  the wall regardless of `detail_px` — a constant ink that overrides `wt_range`
+  modulation. Absent ⇒ the pixel-derived stroke (byte-stable default).
+- **Point budget (`simplify_mm`, `engine/smooth.py:decimate_contours`).** Detail ×
+  levels × Chaikin can push a mural into the millions of points, which chokes
+  editors and plotters. After smoothing, a Ramer–Douglas–Peucker pass drops
+  interior points within `simplify_mm` (converted from print size to grid px) of
+  their chord — shape-preserving, exact endpoints, iterative so a huge path can't
+  blow the recursion limit. Absent ⇒ no decimation (byte-stable default).
+
+## Large prints: compute ceiling and guards
+
+The `march` field is a **single global fast-marching geodesic from the seed**
+(`MCP.find_costs`); arrival times propagate across the *whole* field, so the
+computation **cannot be tiled** — achievable detail is bounded by the largest grid
+that fits in memory for one solve. The realistic levers are therefore *raise the
+cap, make the one solve leaner, and guard it*, not tiling:
+
+- The geodesic cost array is **float32** (the heaviest array; halves peak memory
+  versus the old float64 with no meaningful change to the field).
+- `detail_px` tops out at the **measured** practical ceiling (~10s / ~1.4GB at
+  4000px on the canonical sources); past that, time and RSS climb steeply.
+- `MAX_GRID_PX` (env, default 16M px ≈ a 4000² grid) backstops the heavy solve: a
+  `detail_px` × wide-`canvas_aspect` combination whose grid area exceeds it returns
+  a clean **400** ("reduce DETAIL or canvas") instead of OOMing the host.
+- Raising `detail_px` above the *source* resolution does nothing — the pipeline
+  never upscales (Step 1). A genuinely detailed mural needs a high-res source.
+- The PNG download is a raster *preview* capped to a max longest side (the SVG is
+  the real print deliverable and stays full-resolution vector); the dev server runs
+  `threaded=True` so a slow render doesn't serialize other requests (front with
+  gunicorn + a long `--timeout` for real mural traffic).
 
 ## API Parameter Ranges
 
@@ -234,7 +267,7 @@ writer in `engine/export.py`; the field/contour/smooth core is untouched.
 | seed_x/seed_y | processing-grid pixels | center | UI seeds are in the resized preview grid (canvas grid when a canvas aspect is set). |
 | method | contour/wave/flow/march | march | API + UI default — the canonical "woman output" (fast-marching reciprocal cost), matching `render_tick.sh`. |
 | diamond | 0-1 | 0.0 | `wave` only — maps to `WAVE_DIAMOND` if sent. |
-| detail_px | 400-2400 | `MAX_DIM` (800) | Processing-grid longest side; raise for large prints (only matters when the source exceeds the cap). |
+| detail_px | 400-4000 | `MAX_DIM` (800) | Processing-grid longest side; raise for large prints (only matters when the source exceeds the cap — never upscales). The upper bound is the measured practical ceiling for one geodesic solve (~10s / ~1.4GB at 4000px); a render whose grid area exceeds `MAX_GRID_PX` is rejected 400. |
 | canvas_aspect | `W:H` / ratio | blank = source | Mural canvas target aspect (`engine/compose.py`). |
 | canvas_fit | contain/cover | contain | Letterbox vs center-crop. |
 | margin_fill | light/mean/dark/edge | light | Tone filling the letterbox margins. |
@@ -243,6 +276,8 @@ writer in `engine/export.py`; the field/contour/smooth core is untouched.
 | palette | CSS colors | default ramp | Per-layer colors (index = layer). |
 | phys_width/phys_height | > 0 | none | Physical export size; stamps real units on the SVG. |
 | phys_units | in/cm/mm | in | Units for the physical size. |
+| pen_mm | > 0 | none | Plotter pen width in mm — draws a constant physical stroke (overrides `wt_range`); needs `phys` to resolve to viewBox units. Absent ⇒ pixel-derived stroke (byte-stable default). |
+| simplify_mm | > 0 | none | RDP point-budget tolerance in mm — drops redundant points so big-print SVGs stay light for editors/plotters; needs `phys` (converted to grid px). Absent ⇒ no decimation. |
 
 ## The active field: method=march (fast marching, reciprocal cost)
 

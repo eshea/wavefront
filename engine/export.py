@@ -47,9 +47,28 @@ def compute_stroke(normalized_t, wt_range):
     return round(width, 3), round(opacity, 3)
 
 
+# Physical-unit conversion to millimetres (pen widths are quoted in mm — the
+# plotter convention — regardless of the document's display units).
+UNITS_TO_MM = {'in': 25.4, 'cm': 10.0, 'mm': 1.0}
+
+
 def _fmt_phys(value):
     """Format a physical dimension without a trailing '.0' for whole numbers."""
     return f'{value:g}'
+
+
+def _pen_stroke_vb(pen_mm, phys, img_width):
+    """Stroke width in viewBox (grid) units that renders as exactly `pen_mm` at
+    the document's physical size — so a 0.3mm plotter pen reads 0.3mm on the wall
+    independent of DETAIL/resolution. Returns None (=> fall back to the pixel-
+    derived stroke, the byte-stable default) when a real pen width can't be
+    resolved (no pen, no phys size, or non-positive width)."""
+    if not pen_mm or pen_mm <= 0 or not phys or not phys.get('w'):
+        return None
+    phys_w_mm = float(phys['w']) * UNITS_TO_MM.get(phys.get('units', 'in'), 25.4)
+    if phys_w_mm <= 0:
+        return None
+    return round(pen_mm / phys_w_mm * img_width, 4)
 
 
 def _svg_header(img_width, img_height, phys=None, extra_ns=''):
@@ -124,14 +143,15 @@ def contours_to_svg(contours, img_width, img_height, wt_range=0.0, stroke_scale=
 
 
 def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.0,
-                                stroke_scale=1.0, phys=None):
+                                stroke_scale=1.0, phys=None, pen_mm=None):
     """
     Fast string-building SVG export (avoids svgwrite overhead for large path counts).
     Preferred for production use.
 
     Args: same as contours_to_svg, plus optional phys ({'w','h','units'}) to stamp
-        physical width/height on the document. phys=None reproduces the historical
-        single-ink output exactly.
+        physical width/height on the document, and optional pen_mm to draw at a
+        fixed physical pen width (constant ink — overrides wt_range modulation).
+        phys=None and pen_mm=None reproduce the historical single-ink output exactly.
     Returns: svg string
     """
     lines = [
@@ -139,14 +159,18 @@ def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.0,
         f'<rect width="{img_width}" height="{img_height}" fill="white"/>'
     ]
 
+    pen_vb = _pen_stroke_vb(pen_mm, phys, img_width)
     for c in contours:
         pts = c['points']
         if len(pts) < 2:
             continue
 
-        norm_t = c['normalized_t']
-        width, opacity = compute_stroke(norm_t, wt_range)
-        width = round(width * stroke_scale, 3)
+        if pen_vb is not None:
+            width, opacity = pen_vb, 1.0
+        else:
+            norm_t = c['normalized_t']
+            width, opacity = compute_stroke(norm_t, wt_range)
+            width = round(width * stroke_scale, 3)
 
         first = pts[0]
         d = f'M{first[1]:.1f},{first[0]:.1f}'
@@ -164,7 +188,7 @@ def contours_to_svg_string_fast(contours, img_width, img_height, wt_range=0.0,
 
 
 def contours_to_svg_layered(contours, img_width, img_height, palette,
-                            wt_range=0.0, stroke_scale=1.0, phys=None):
+                            wt_range=0.0, stroke_scale=1.0, phys=None, pen_mm=None):
     """
     Layered SVG export: one Inkscape pen layer per color (mural color mode).
 
@@ -190,6 +214,7 @@ def contours_to_svg_layered(contours, img_width, img_height, palette,
         f'<rect width="{img_width}" height="{img_height}" fill="white"/>'
     ]
 
+    pen_vb = _pen_stroke_vb(pen_mm, phys, img_width)
     by_layer = {}
     for c in contours:
         by_layer.setdefault(int(c.get('layer', 0)), []).append(c)
@@ -205,8 +230,11 @@ def contours_to_svg_layered(contours, img_width, img_height, palette,
             pts = c['points']
             if len(pts) < 2:
                 continue
-            width, opacity = compute_stroke(c['normalized_t'], wt_range)
-            width = round(width * stroke_scale, 3)
+            if pen_vb is not None:
+                width, opacity = pen_vb, 1.0
+            else:
+                width, opacity = compute_stroke(c['normalized_t'], wt_range)
+                width = round(width * stroke_scale, 3)
             first = pts[0]
             d = f'M{first[1]:.1f},{first[0]:.1f}'
             d += ''.join(f'L{pt[1]:.1f},{pt[0]:.1f}' for pt in pts[1:])
