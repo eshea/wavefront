@@ -76,6 +76,10 @@ METHOD_KNOBS = {
         ('flow_carrier_mag',  efl, 'FLOW_CARRIER_MAG',  1.0, 20.0),
         ('flow_tone_density', efl, 'FLOW_TONE_DENSITY', 0.0, 1.0),
         ('flow_sigma',        efl, 'FLOW_SIGMA',        1.0, 12.0),
+        # Edge-Tangent-Flow coherence smoothing (Kang et al.); 0 = off (default).
+        ('flow_etf',          efl, 'FLOW_ETF',          0.0, 1.0),
+        ('flow_etf_radius',   efl, 'FLOW_ETF_RADIUS',   1.0, 8.0),
+        ('flow_etf_iters',    efl, 'FLOW_ETF_ITERS',    0.0, 4.0),
     ],
 }
 

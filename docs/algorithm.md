@@ -384,7 +384,12 @@ swap Step 3. They are not actively tuned — left for comparison/experiment.
   uniform warp tends to over-densify the face into a smudge — which is why the
   wave field (bounded, seed-faded relief) became the active method.
 - **`method=flow` (`engine/flow.py`)** — evenly-spaced gradient streamlines
-  (Jobard & Lefebvre); a fundamentally different, hair-like aesthetic.
+  (Jobard & Lefebvre); a fundamentally different, hair-like aesthetic. An opt-in
+  **Edge-Tangent-Flow** coherence pass (Kang, Lee & Chui 2007 — `etf_smooth`,
+  gated by `flow_etf`) realigns each tangent toward spatially-near neighbours that
+  carry stronger edges and already point a similar way, turning the raw streamlines
+  from "hair-like" into clean, coherent lines. `flow_etf=0` (default) skips it, so
+  the parked output is unchanged; `flow_etf_radius`/`flow_etf_iters` size the kernel.
 
 Malformed numeric values return HTTP 400. Out-of-range numeric values are
 clamped to the ranges above.

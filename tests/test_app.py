@@ -643,5 +643,78 @@ class OptimizeEndpointTests(unittest.TestCase):
             max(merged['stats']['total_points'] - merged['stats']['paths'], 0))
 
 
+def _neighbor_coherence(tx, ty):
+    """Mean |t(x)·t(right-neighbour)| — higher = smoother/more coherent field."""
+    dot = np.abs(tx[:, :-1] * tx[:, 1:] + ty[:, :-1] * ty[:, 1:])
+    return float(dot.mean())
+
+
+class ETFFlowTests(unittest.TestCase):
+    """Edge-Tangent-Flow coherence smoothing of the parked flow tangent field."""
+
+    def setUp(self):
+        ys, xs = np.mgrid[0:48, 0:48].astype(np.float32)
+        ang = 0.6 * np.sin(xs / 3.0) + 0.6 * np.cos(ys / 4.0) + 0.3 * np.sin(xs + ys)
+        self.tx = np.cos(ang).astype(np.float32)
+        self.ty = np.sin(ang).astype(np.float32)
+        self.mag = (0.5 + 0.5 * np.sin(xs / 5.0)).astype(np.float32)
+
+    def test_etf_identity_when_off(self):
+        from engine.flow import etf_smooth
+        ox, oy = etf_smooth(self.tx, self.ty, self.mag, 3.0, 0)
+        self.assertIs(ox, self.tx)
+        self.assertIs(oy, self.ty)
+        ox, oy = etf_smooth(self.tx, self.ty, self.mag, 0.0, 3)
+        self.assertIs(ox, self.tx)
+
+    def test_etf_increases_coherence_and_stays_unit_norm(self):
+        from engine.flow import etf_smooth
+        before = _neighbor_coherence(self.tx, self.ty)
+        ox, oy = etf_smooth(self.tx, self.ty, self.mag, 3.0, 2)
+        after = _neighbor_coherence(ox, oy)
+        self.assertGreater(after, before)
+        self.assertTrue(np.all(np.isfinite(ox)) and np.all(np.isfinite(oy)))
+        self.assertTrue(np.allclose(np.hypot(ox, oy), 1.0, atol=1e-3))
+
+    def test_tangent_field_unchanged_when_flow_etf_zero(self):
+        import engine.flow as eflow
+        lum = (np.mgrid[0:40, 0:40][1] * 6.0).astype(np.float32)
+        base = eflow._tangent_field(lum, 3.0)
+        saved = eflow.FLOW_ETF
+        try:
+            eflow.FLOW_ETF = 0.0
+            again = eflow._tangent_field(lum, 3.0)
+        finally:
+            eflow.FLOW_ETF = saved
+        for a, b in zip(base, again):
+            np.testing.assert_array_equal(a, b)
+
+    def test_trace_flow_lines_with_etf_is_deterministic(self):
+        import engine.flow as eflow
+        lum = (np.mgrid[0:60, 0:60][0] * 4.0).astype(np.float32)
+        saved = (eflow.FLOW_ETF, eflow.FLOW_ETF_ITERS)
+        try:
+            eflow.FLOW_ETF, eflow.FLOW_ETF_ITERS = 0.6, 2.0
+            c1, s1 = eflow.trace_flow_lines(lum, 30, 30, 80, 0.8)
+            c2, s2 = eflow.trace_flow_lines(lum, 30, 30, 80, 0.8)
+        finally:
+            eflow.FLOW_ETF, eflow.FLOW_ETF_ITERS = saved
+        self.assertEqual(s1['paths'], s2['paths'])
+        self.assertEqual(s1['total_points'], s2['total_points'])
+        self.assertGreater(s1['paths'], 0)
+        for c in c1:
+            self.assertEqual(c['points'].shape[1], 2)
+
+
+class ETFConfigEndpointTests(unittest.TestCase):
+    def test_config_exposes_flow_etf_knobs_defaulting_off(self):
+        client = app.test_client()
+        payload = client.get('/config').get_json()
+        flow = {k['field']: k for k in payload['knobs']['flow']}
+        for name in ('flow_etf', 'flow_etf_radius', 'flow_etf_iters'):
+            self.assertIn(name, flow)
+        self.assertEqual(flow['flow_etf']['default'], 0.0)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -59,6 +59,68 @@ FLOW_TONE_DENSITY = 0.6  # darkness -> tighter line spacing (denser lines in dar
                          # to ~40% of the base separation. The artist's output is dense
                          # in shadow and sparse in highlight — this reproduces that.
 
+# Edge-Tangent-Flow (ETF) coherence smoothing — Kang, Lee & Chui (2007),
+# "Coherent Line Drawing". The raw rotated-gradient tangent is noisy ("hair-like");
+# ETF iteratively realigns each tangent toward neighbours that are spatially near,
+# carry STRONGER edges, and already point a similar way, turning the field into
+# clean, coherent streamlines. FLOW_ETF=0 (default) skips it entirely → the parked
+# flow output is byte-identical to before; >0 blends the smoothed field in.
+FLOW_ETF = 0.0          # 0 = off (identity); 1 = fully replace with the ETF-smoothed field
+FLOW_ETF_RADIUS = 3.0   # neighbourhood radius in px for the coherence kernel
+FLOW_ETF_ITERS = 2.0    # refinement passes (rounded to int; 0 = identity)
+
+
+def _shift_clamp(a, dx, dy):
+    """Edge-clamped shift: returns S with S[y, x] = a[y+dy, x+dx] (no wrap-around).
+    Used to gather neighbour values for the vectorised ETF kernel."""
+    H, W = a.shape
+    ys = np.clip(np.arange(H) + dy, 0, H - 1)
+    xs = np.clip(np.arange(W) + dx, 0, W - 1)
+    return a[np.ix_(ys, xs)]
+
+
+def etf_smooth(tx, ty, mag, radius, iters):
+    """Edge-Tangent-Flow coherence smoothing of a unit tangent field.
+
+    Per Kang et al., the refined tangent at x is the normalised sum over a disc
+    neighbourhood of  φ·w_m·w_d·t(y),  where
+        φ   = sign(t(x)·t(y))            resolves the 180° tangent ambiguity,
+        w_d = |t(x)·t(y)|                weights aligned neighbours,
+        w_m = ½(1 + tanh(ĝ(y) − ĝ(x)))   weights neighbours on stronger edges,
+    and the spatial weight is a box disc of the given radius (w_s ∈ {0,1}). ĝ is the
+    fixed normalised gradient magnitude; only the tangent updates between passes.
+
+    Returns a new (tx, ty) unit field. iters<1 or radius<1 → returns the input.
+    """
+    radius = int(round(float(radius)))
+    iters = int(round(float(iters)))
+    if iters < 1 or radius < 1:
+        return tx, ty
+    mmax = float(mag.max())
+    ghat = (mag / mmax).astype(np.float32) if mmax > 1e-8 else np.zeros_like(mag)
+    # Disc of integer offsets within the radius (deterministic order).
+    offsets = [(dx, dy)
+               for dy in range(-radius, radius + 1)
+               for dx in range(-radius, radius + 1)
+               if dx * dx + dy * dy <= radius * radius and not (dx == 0 and dy == 0)]
+    cx, cy = tx.astype(np.float32), ty.astype(np.float32)
+    for _ in range(iters):
+        ax = np.zeros_like(cx)
+        ay = np.zeros_like(cy)
+        for dx, dy in offsets:
+            nbx = _shift_clamp(cx, dx, dy)
+            nby = _shift_clamp(cy, dx, dy)
+            ng = _shift_clamp(ghat, dx, dy)
+            dot = cx * nbx + cy * nby           # t(x)·t(y)
+            wm = 0.5 * (1.0 + np.tanh(ng - ghat))   # stronger edge dominates
+            wgt = np.sign(dot) * np.abs(dot) * wm   # φ·w_d·w_m  (w_s=1 inside disc)
+            ax += wgt * nbx
+            ay += wgt * nby
+        n = np.hypot(ax, ay) + 1e-8
+        cx = (ax / n).astype(np.float32)
+        cy = (ay / n).astype(np.float32)
+    return cx, cy
+
 
 def _tangent_field(luminance, sigma):
     """Unit tangent field = image gradient rotated 90° (flows along iso-brightness),
@@ -72,6 +134,22 @@ def _tangent_field(luminance, sigma):
     norm = np.hypot(tx, ty) + 1e-6
     tx /= norm
     ty /= norm
+
+    # Edge-Tangent-Flow coherence smoothing (opt-in). FLOW_ETF=0 (default) skips
+    # this entirely so the parked flow output is unchanged; >0 blends in the
+    # ETF-smoothed field (sign-aligned to avoid 180°-ambiguity cancellation).
+    if FLOW_ETF > 0:
+        etx, ety = etf_smooth(tx, ty, mag, FLOW_ETF_RADIUS, FLOW_ETF_ITERS)
+        sign = np.sign(tx * etx + ty * ety)
+        sign[sign == 0] = 1.0
+        etx *= sign
+        ety *= sign
+        f = float(FLOW_ETF)
+        tx = (1.0 - f) * tx + f * etx
+        ty = (1.0 - f) * ty + f * ety
+        en = np.hypot(tx, ty) + 1e-6
+        tx /= en
+        ty /= en
 
     # Carrier unit vector.
     ca = np.radians(FLOW_ANGLE)
