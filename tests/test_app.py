@@ -569,5 +569,79 @@ class SeparationEndpointTests(unittest.TestCase):
         self.assertNotIn('inkscape', payload['svg'])
 
 
+class OptimizeUnitTests(unittest.TestCase):
+    def test_all_default_is_identity(self):
+        from engine.optimize import optimize_contours
+        cs = [_contour([[0, 0], [1, 1], [2, 2]])]
+        self.assertIs(optimize_contours(cs), cs)
+
+    def test_drop_short_removes_stubs(self):
+        from engine.optimize import drop_short
+        long_path = _contour([[0, c] for c in range(20)])      # arclength 19
+        stub = _contour([[0, 0], [0, 1]])                       # arclength 1
+        out = drop_short([long_path, stub], 5.0)
+        self.assertEqual(len(out), 1)
+        self.assertIs(out[0], long_path)
+
+    def test_merge_joins_within_gap_only(self):
+        from engine.optimize import merge_chains
+        a = _contour([[0, 0], [0, 10]])
+        b = _contour([[0, 10], [0, 20]])           # touches a's tail
+        far = _contour([[100, 100], [100, 110]])   # nowhere near
+        out = merge_chains([a, b, far], 0.5)
+        self.assertEqual(len(out), 2)              # a+b merged, far stays
+        self.assertEqual(max(len(c['points']) for c in out), 4)
+
+    def test_merge_never_crosses_layers(self):
+        from engine.optimize import merge_chains
+        a = _contour([[0, 0], [0, 10]], layer=0)
+        b = _contour([[0, 10], [0, 20]], layer=1)  # same endpoint, different pen
+        out = merge_chains([a, b], 0.5)
+        self.assertEqual(len(out), 2)              # not joined across layers
+
+    def test_reorder_reduces_pen_up_travel(self):
+        from engine.optimize import reorder_nearest, _tour_cost
+        p0 = _contour([[0, 0], [0, 1]])
+        p1 = _contour([[0, 40], [0, 41]])
+        p2 = _contour([[0, 20], [0, 21]])
+        original = [p0, p1, p2]                     # 0 -> 40 -> 20: long zig-zag
+        out = reorder_nearest(original)
+        self.assertLess(_tour_cost(out), _tour_cost(original))
+
+    def test_two_opt_never_increases_travel(self):
+        from engine.optimize import two_opt, _tour_cost
+        paths = [_contour([[0, x], [0, x + 1]]) for x in (0, 50, 10, 40, 20, 30)]
+        before = _tour_cost(paths)
+        out = two_opt(paths, 4)
+        self.assertLessEqual(_tour_cost(out), before + 1e-6)
+
+
+class OptimizeEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def _post(self, **fields):
+        with EXAMPLE.open('rb') as f:
+            data = {'image': (f, EXAMPLE.name)}
+            data.update(fields)
+            return self.client.post('/process', data=data,
+                                    content_type='multipart/form-data')
+
+    def test_off_params_are_byte_identical_to_baseline(self):
+        base = self._post().get_json()['svg']
+        off = self._post(opt_merge_gap='0', opt_min_seg='0',
+                         opt_two_opt='0', opt_reorder='off').get_json()['svg']
+        self.assertEqual(base, off)
+
+    def test_merge_reduces_path_count_and_stays_valid(self):
+        base = self._post().get_json()
+        merged = self._post(opt_merge_gap='3').get_json()
+        self.assertLessEqual(merged['stats']['paths'], base['stats']['paths'])
+        ElementTree.fromstring(merged['svg'])     # still well-formed SVG
+        self.assertEqual(
+            merged['stats']['segments'],
+            max(merged['stats']['total_points'] - merged['stats']['paths'], 0))
+
+
 if __name__ == '__main__':
     unittest.main()

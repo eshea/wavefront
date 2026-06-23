@@ -263,6 +263,17 @@ writer in `engine/export.py`; the field/contour/smooth core is untouched.
   interior points within `simplify_mm` (converted from print size to grid px) of
   their chord — shape-preserving, exact endpoints, iterative so a huge path can't
   blow the recursion limit. Absent ⇒ no decimation (byte-stable default).
+- **Plotter path optimization (`engine/optimize.py`).** A plotter draws each path
+  pen-down and travels pen-up between paths; marching-squares emits paths in scan
+  order, so consecutive paths can be far apart. After layer assignment (so it never
+  crosses pens) an opt-in pass cuts that waste — CONTOUR-V STUDIO's "CHAIN GAP /
+  TSP-ORDER / 2-OPT" tools: `opt_merge_gap` joins open paths whose endpoints are
+  within a gap (fewer pen lifts), `opt_reorder` greedily visits nearest endpoints
+  (shorter pen-up travel, reversing paths as needed), `opt_two_opt` runs bounded
+  2-opt polish on that order (guarded so it can never increase travel), and
+  `opt_min_seg` drops stub paths below an arclength. Geometry drawn is unchanged;
+  all default off ⇒ the export is byte-identical. (Simplification is the separate
+  `simplify_mm` / `decimate_contours` pass above.)
 
 ## Large prints: compute ceiling and guards
 
@@ -314,6 +325,10 @@ cap, make the one solve leaner, and guard it*, not tiling:
 | hatch_levels | 0-150 | 0 | Number of contour levels in the crosshatch pass. 0 ⇒ no crosshatch. |
 | hatch_threshold | 0-1 | 0 | Darkness cutoff (luminance/255): crosshatch lines are kept only where the image is darker than this. 0 ⇒ no crosshatch. |
 | hatch_angle | 0-90 | 45 | Rotation of the crosshatch diamond axes vs the primary field. |
+| opt_merge_gap | 0-10 | 0 | Plotter optimization (`engine/optimize.py`): join open paths whose endpoints are within this gap (grid px) to cut pen lifts; layer-aware. 0 ⇒ off. |
+| opt_reorder | on/off | off | Greedy nearest-neighbour path ordering to shorten pen-up travel (layer-aware, reverses paths as needed). |
+| opt_two_opt | 0-10 | 0 | Bounded 2-opt sweeps polishing the visiting order (guarded never to increase travel). 0 ⇒ off. |
+| opt_min_seg | 0-50 | 0 | Drop paths whose arclength (grid px) is below this. 0 ⇒ keep all. |
 
 ## The active field: method=march (fast marching, reciprocal cost)
 

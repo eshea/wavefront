@@ -28,6 +28,7 @@ from engine.compose import compose_canvas, parse_aspect, MARGIN_FILLS
 from engine.color import (assign_layers, default_palette, separate_channels,
                           cmyk_palette)
 from engine.crosshatch import crosshatch_pass
+from engine.optimize import optimize_contours
 
 METHODS = ('contour', 'wave', 'flow', 'march')  # contour = classic isolines (default)
 
@@ -338,6 +339,13 @@ def process():
         hatch_threshold = _parse_float_param('hatch_threshold', 0.0, 0.0, 1.0)
         hatch_levels = _parse_int_param('hatch_levels', 0, 0, 150)
         hatch_angle = _parse_float_param('hatch_angle', 45.0, 0.0, 90.0)
+        # Plotter path optimization (opt-in; all default off => byte-stable export).
+        # Cut pen lifts (merge), shorten pen-up travel (reorder + 2-opt), drop stubs.
+        opt_merge_gap = _parse_float_param('opt_merge_gap', 0.0, 0.0, 10.0)
+        opt_min_seg = _parse_float_param('opt_min_seg', 0.0, 0.0, 50.0)
+        opt_two_opt = _parse_int_param('opt_two_opt', 0, 0, 10)
+        opt_reorder = (request.form.get('opt_reorder') or '').strip().lower() \
+            in ('1', 'true', 'on', 'yes')
 
         try:
             rgb_array, original_size, processed_size = load_and_preprocess(
@@ -430,6 +438,13 @@ def process():
             gray_ref = ((luminance / 255.0).astype('float32')
                         if color_mode == 'tone' else None)
             assign_layers(contours, n_colors, mode=color_mode, gray=gray_ref)
+
+        # Plotter path optimization — runs AFTER layer assignment so merge/reorder
+        # stay within each pen's set, and on the processing grid before scaling.
+        contours = optimize_contours(
+            contours, merge_gap=opt_merge_gap, reorder=opt_reorder,
+            two_opt_passes=opt_two_opt, min_seg=opt_min_seg)
+        stats['paths'] = len(contours)
 
         total_pts = sum(len(c['points']) for c in contours)
         stats['total_points'] = total_pts

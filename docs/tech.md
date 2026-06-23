@@ -41,6 +41,7 @@ app.py  ── validates/clamps params (RequestValidationError → HTTP 400)
    ├─ engine.smooth.smooth_contours      Chaikin corner-cutting
    ├─ engine.smooth.decimate_contours    OPT-IN: RDP point budget for big prints (simplify_mm)
    ├─ engine.color.assign_layers         OPT-IN: tag each contour with a pen index (color_mode tone/depth)
+   ├─ engine.optimize.optimize_contours  OPT-IN: layer-aware merge / nearest-sort / 2-opt to cut pen-up travel (opt_*)
    ├─ engine.contour.scale_contours      processing grid → original/canvas dimensions
    └─ engine.export.contours_to_svg_string_fast   constant-ink SVG (modulation opt-in via wt_range; physical pen via pen_mm)
         └─ …_layered (color_mode≠off): one Inkscape pen layer per color; both writers stamp physical size if phys given
