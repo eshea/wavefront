@@ -141,6 +141,26 @@ end, not the canonical path.
   out, real corners stay, point count drops ~70%. Endpoints are preserved
   exactly (closed paths stay closed; tiny closed loops keep ≥4 samples).
 
+## Step 4c: Crosshatch second-direction depth (opt-in — `engine/crosshatch.py`)
+
+A single diamond direction can only get so dark before its lines pile into a muddy
+blob — the artist's own stated failure mode for deep shadows. Opt-in crosshatching
+adds a SECOND set of lines that cross the first, **in the dark regions only**, so
+shadows deepen toward solid ink while the lines stay legible:
+
+  1. `build_rotated_field` builds a diamond field with its L1 axes rotated by
+     `hatch_angle` (default 45°) about the seed, so its isolines run across the
+     primary ones.
+  2. `extract_contours` + `resample_contours` at `hatch_levels` produce that second
+     line set, run inside `_apply_knobs` so it shares the tone knobs.
+  3. `mask_dark` clips each line to the runs of points where `luminance/255 <
+     hatch_threshold`, splitting a path wherever it leaves the dark region.
+
+The survivors (tagged `hatch=True`) extend the primary contour list and flow
+through the identical smooth → optimize → color → scale → export path. Off
+(`crosshatch` absent, or `hatch_levels`/`hatch_threshold` at 0) ⇒ no extra lines,
+output unchanged.
+
 ## Step 5: Chaikin Smoothing
 
   Chaikin's corner-cutting algorithm is applied iteratively:
@@ -278,6 +298,10 @@ cap, make the one solve leaner, and guard it*, not tiling:
 | phys_units | in/cm/mm | in | Units for the physical size. |
 | pen_mm | > 0 | none | Plotter pen width in mm — draws a constant physical stroke (overrides `wt_range`); needs `phys` to resolve to viewBox units. Absent ⇒ pixel-derived stroke (byte-stable default). |
 | simplify_mm | > 0 | none | RDP point-budget tolerance in mm — drops redundant points so big-print SVGs stay light for editors/plotters; needs `phys` (converted to grid px). Absent ⇒ no decimation. |
+| crosshatch | on/off | off | Add a rotated second-direction line set clipped to dark regions (`engine/crosshatch.py`), deepening shadows. Needs `hatch_levels` > 0. |
+| hatch_levels | 0-150 | 0 | Number of contour levels in the crosshatch pass. 0 ⇒ no crosshatch. |
+| hatch_threshold | 0-1 | 0 | Darkness cutoff (luminance/255): crosshatch lines are kept only where the image is darker than this. 0 ⇒ no crosshatch. |
+| hatch_angle | 0-90 | 45 | Rotation of the crosshatch diamond axes vs the primary field. |
 
 ## The active field: method=march (fast marching, reciprocal cost)
 

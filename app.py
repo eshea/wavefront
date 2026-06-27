@@ -26,6 +26,7 @@ from engine.flow import trace_flow_lines
 from engine.march import build_march_field
 from engine.compose import compose_canvas, parse_aspect, MARGIN_FILLS
 from engine.color import assign_layers, default_palette
+from engine.crosshatch import crosshatch_pass
 
 METHODS = ('contour', 'wave', 'flow', 'march')  # contour = classic isolines (default)
 
@@ -302,6 +303,14 @@ def process():
         # Point-budget simplify tolerance (mm) — RDP decimation for big prints,
         # converted to grid px below once the processing size is known.
         simplify_mm = _parse_optional_float_param('simplify_mm', min_value=0.0)
+        # Crosshatch second-direction depth layer (opt-in; off => no extra lines).
+        # Adds a rotated diamond pass clipped to dark regions so deep shadows get
+        # cross-hatched depth instead of a single direction smearing into a blob.
+        crosshatch = (request.form.get('crosshatch') or '').strip().lower() \
+            in ('1', 'true', 'on', 'yes')
+        hatch_threshold = _parse_float_param('hatch_threshold', 0.0, 0.0, 1.0)
+        hatch_levels = _parse_int_param('hatch_levels', 0, 0, 150)
+        hatch_angle = _parse_float_param('hatch_angle', 45.0, 0.0, 90.0)
 
         try:
             rgb_array, original_size, processed_size = load_and_preprocess(
@@ -358,6 +367,14 @@ def process():
                 # Fixed-step resample (STUDIO "STEP"): de-jitters raw marching-
                 # squares points before smoothing. Flow traces its own step.
                 contours = resample_contours(contours)
+            # Crosshatch overlay (opt-in): a rotated diamond pass clipped to dark
+            # regions, deepening shadows without smearing. Runs inside _apply_knobs
+            # so it shares the tone knobs; returns [] when off => contours untouched.
+            if crosshatch and hatch_levels > 0:
+                contours = contours + crosshatch_pass(
+                    luminance, sx, sy, hatch_levels, lum_mix,
+                    threshold=hatch_threshold, angle=hatch_angle)
+                stats['paths'] = len(contours)
         stats['method'] = method
 
         contours = smooth_contours(contours, smooth)

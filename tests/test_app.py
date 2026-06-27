@@ -443,5 +443,68 @@ class PenStrokeTests(unittest.TestCase):
             self.assertAlmostEqual(back_mm, 0.5, places=3)
 
 
+class CrosshatchUnitTests(unittest.TestCase):
+    def test_pass_off_returns_empty(self):
+        from engine.crosshatch import crosshatch_pass
+        lum = np.full((40, 40), 120.0, dtype=np.float32)
+        self.assertEqual(crosshatch_pass(lum, 20, 20, 0, threshold=0.5), [])
+        self.assertEqual(crosshatch_pass(lum, 20, 20, 30, threshold=0.0), [])
+
+    def test_rotated_field_matches_build_field_at_zero_angle(self):
+        from engine.field import build_field, build_rotated_field
+        lum = (np.mgrid[0:30, 0:30][1] * 8.0).astype(np.float32)
+        a = build_field(lum, 12, 12, 0.8)
+        b = build_rotated_field(lum, 12, 12, 0.8, 0.0)
+        np.testing.assert_array_equal(a[0], b[0])
+        self.assertEqual(a[1], b[1])
+        self.assertEqual(a[2], b[2])
+
+    def test_mask_dark_clips_to_dark_runs(self):
+        from engine.crosshatch import mask_dark
+        gray = np.ones((10, 20), dtype=np.float32)
+        gray[:, :10] = 0.0                                  # left half dark
+        crossing = _contour([[5, c] for c in range(20)])    # spans both halves
+        inside = _contour([[5, c] for c in range(8)])       # fully in the dark half
+        out = mask_dark([crossing, inside], gray, 0.5)
+        self.assertTrue(out)
+        for c in out:
+            self.assertTrue(np.all(c['points'][:, 1] < 10))  # only dark-half points
+            self.assertTrue(c.get('hatch'))
+
+    def test_hatch_lands_only_in_dark_region(self):
+        from engine.crosshatch import crosshatch_pass
+        lum = np.full((60, 60), 255.0, dtype=np.float32)
+        lum[:, :30] = 0.0                                   # left half dark
+        hatch = crosshatch_pass(lum, 30, 30, 50, threshold=0.5, angle=45.0)
+        self.assertTrue(hatch)
+        for c in hatch:
+            self.assertLess(c['points'][:, 1].max(), 31.0)
+
+
+class CrosshatchEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def _post(self, **fields):
+        with EXAMPLE.open('rb') as f:
+            data = {'image': (f, EXAMPLE.name)}
+            data.update(fields)
+            return self.client.post('/process', data=data,
+                                    content_type='multipart/form-data')
+
+    def test_off_is_byte_identical_to_baseline(self):
+        base = self._post().get_json()['svg']
+        off = self._post(crosshatch='off', hatch_levels='0',
+                         hatch_threshold='0').get_json()['svg']
+        self.assertEqual(base, off)
+
+    def test_crosshatch_adds_paths(self):
+        base = self._post().get_json()['stats']['paths']
+        hatched = self._post(crosshatch='on', hatch_levels='40',
+                             hatch_threshold='0.7').get_json()
+        self.assertGreater(hatched['stats']['paths'], base)
+        ElementTree.fromstring(hatched['svg'])
+
+
 if __name__ == '__main__':
     unittest.main()

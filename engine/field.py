@@ -137,6 +137,34 @@ def build_field(luminance, seed_x, seed_y, lum_mix=1.0):
     return field.astype(np.float32), float(field.min()), float(field.max())
 
 
+def build_rotated_field(luminance, seed_x, seed_y, lum_mix=1.0, angle_deg=0.0):
+    """`build_field` with the L1 (diamond) axes rotated by `angle_deg` about the
+    seed. angle_deg=0 reproduces `build_field` exactly; non-zero angles give a
+    diamond grid running in a different direction — used for the crosshatch second
+    direction (`engine/crosshatch.py`) and per-channel moiré-avoidance in CMYK pen
+    separation (`engine/color.py`). Returns the same `(field, min, max)` shape so
+    it feeds the identical downstream isoline path."""
+    H, W = luminance.shape
+    luminance = shape_tone(luminance)
+
+    lum_pre = gaussian_filter(luminance, sigma=FIELD_DENOISE_SIGMA)
+    if FIELD_SHADOW_LIFT > 0:
+        lum_pre = FIELD_SHADOW_LIFT + lum_pre * ((255.0 - FIELD_SHADOW_LIFT) / 255.0)
+
+    xs = np.arange(W, dtype=np.float32)
+    ys = np.arange(H, dtype=np.float32)
+    xx, yy = np.meshgrid(xs, ys)
+    dx = xx - seed_x
+    dy = yy - seed_y
+    if angle_deg:
+        a = np.radians(float(angle_deg))
+        ca, sa = np.cos(a), np.sin(a)
+        dx, dy = dx * ca + dy * sa, -dx * sa + dy * ca
+    field = (np.abs(dx) + np.abs(dy)) + (255.0 - lum_pre) * lum_mix
+
+    return field.astype(np.float32), float(field.min()), float(field.max())
+
+
 # --- Tunable knobs for the wave (L1-diamond) field. The ralph loop edits these
 # the same way it edits engine/contour.py's power=2.7. ---
 # NOTE on the zone radii: INNER/OUTER are deliberately WIDE so the relief grades
