@@ -44,9 +44,13 @@ The reference outputs in `examples/` define the target. Concretely:
 - **Mural / large-format output (extension beyond CORE).** Opt-in features for
   producing big physical wall pieces from one photo: a **wide canvas** that pads
   the subject into a chosen aspect (e.g. 7ft×3.5ft ≈ 2:1) and lets the diamond
-  field fill the margins; **multi-pen color separations** (duotone by darkness, or
-  a depth/elevation color ramp — exported as Inkscape pen layers for plotters);
-  and **print-ready export** (physical units stamped on the SVG, raised processing
+  field fill the margins; **multi-pen color separations** (duotone by darkness, a
+  depth/elevation color ramp, or true **C/M/Y/K (and rotated tonal-tier) channel
+  separation** — each pen its own diamond field at a distinct halftone screen angle,
+  exported as Inkscape pen layers for plotters); **crosshatch depth** (a rotated
+  second line set in the shadows so darks deepen instead of smearing); **plotter
+  path optimization** (merge/sort/2-opt to cut pen lifts and travel); and
+  **print-ready export** (physical units stamped on the SVG, raised processing
   detail for large sources). All default off — CORE renders single black ink at
   source aspect unchanged. See `algorithm.md` → "Mural extensions". Production
   paths (large-format print shop vs wall-drawing robot vs projection) are a

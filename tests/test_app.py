@@ -506,5 +506,68 @@ class CrosshatchEndpointTests(unittest.TestCase):
         ElementTree.fromstring(hatched['svg'])
 
 
+class SeparationUnitTests(unittest.TestCase):
+    def test_rgb_to_cmyk_pure_colors(self):
+        from engine.color import rgb_to_cmyk
+        img = np.array([[[0, 255, 255], [0, 0, 0], [255, 255, 255]]],
+                       dtype=np.float32)            # cyan, black, white
+        c, m, y, k = rgb_to_cmyk(img)
+        self.assertAlmostEqual(float(c[0, 0]), 1.0, places=3)   # cyan -> C
+        self.assertAlmostEqual(float(m[0, 0]), 0.0, places=3)
+        self.assertAlmostEqual(float(k[0, 1]), 1.0, places=3)   # black -> K
+        self.assertAlmostEqual(float(k[0, 2]), 0.0, places=3)   # white -> no K
+
+    def test_rotated_field_actually_rotates(self):
+        from engine.field import build_rotated_field
+        lum = (np.mgrid[0:40, 0:40][1] * 6.0).astype(np.float32)
+        f0 = build_rotated_field(lum, 20, 20, 0.8, 0.0)[0]
+        f45 = build_rotated_field(lum, 20, 20, 0.8, 45.0)[0]
+        self.assertFalse(np.array_equal(f0, f45))    # rotation changed the field
+
+    def test_cmyk_separation_emits_per_channel_layers(self):
+        from engine.color import separate_channels
+        rgb = np.zeros((60, 60, 3), dtype=np.float32)
+        rgb[:, :30] = (0, 255, 255)                  # cyan left half
+        rgb[:, 30:] = (0, 0, 0)                       # black right half
+        lum = rgb.mean(axis=2).astype(np.float32)
+        out = separate_channels(lum, rgb, 30, 30, 60, 0.8,
+                                mode='cmyk', threshold=0.2)
+        layers = {c['layer'] for c in out}
+        self.assertIn(0, layers)                     # cyan channel
+        self.assertIn(3, layers)                     # black channel
+
+    def test_lum_separation_bands_into_tiers(self):
+        from engine.color import separate_channels
+        lum = np.tile(np.linspace(0, 255, 90, dtype=np.float32), (90, 1))  # gradient
+        out = separate_channels(lum, None, 45, 45, 80, 0.8, mode='lum', n_colors=3)
+        layers = {c['layer'] for c in out}
+        self.assertTrue(layers.issubset({0, 1, 2}))
+        self.assertGreaterEqual(len(layers), 2)      # genuinely separated
+
+
+class SeparationEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def _post(self, **fields):
+        with EXAMPLE.open('rb') as f:
+            data = {'image': (f, EXAMPLE.name)}
+            data.update(fields)
+            return self.client.post('/process', data=data,
+                                    content_type='multipart/form-data')
+
+    def test_cmyk_emits_four_pen_layers(self):
+        payload = self._post(color_mode='cmyk').get_json()
+        self.assertEqual(payload['color_mode'], 'cmyk')
+        self.assertEqual(len(payload['palette']), 4)
+        self.assertIn('inkscape:label="ink-', payload['svg'])
+        ElementTree.fromstring(payload['svg'])
+
+    def test_off_default_is_single_ink(self):
+        payload = self._post().get_json()
+        self.assertIsNone(payload['palette'])
+        self.assertNotIn('inkscape', payload['svg'])
+
+
 if __name__ == '__main__':
     unittest.main()

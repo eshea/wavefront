@@ -235,6 +235,16 @@ writer in `engine/export.py`; the field/contour/smooth core is untouched.
   radiating from the seed — the hypsometric/elevation look). `n_colors` (1–6) and an
   optional `palette` drive the export. Assignment runs on the processing grid before
   scaling, so the `layer` index survives the scale-to-export step.
+- **Channel separation (`engine/color.py:separate_channels`, `color_mode=cmyk`/`lum`).**
+  Goes beyond banding one field: each channel/tier gets its OWN diamond field via
+  `build_rotated_field`, rotated to a distinct **screen angle** (`SCREEN_ANGLES`, the
+  halftone-craft reason print screens are angled — avoids the four line sets beating
+  into a moiré), then clipped to where that channel is present. `cmyk` splits RGB
+  into Cyan/Magenta/Yellow/Key pens (`rgb_to_cmyk`, density following each channel's
+  intensity, clipped at `sep_threshold`; default `CMYK_PALETTE`). `lum` splits into
+  `n_colors` rotated luminance tiers (darkest → lightest), each clipped to its tonal
+  band. `sep_angles` overrides the per-layer angles. These REPLACE the single-field
+  build; `off`/`tone`/`depth` are untouched, so the default stays byte-identical.
 - **Layered SVG + physical size (`engine/export.py`).**
   `contours_to_svg_layered` emits one Inkscape pen layer (`<g inkscape:groupmode=
   "layer">`) per color — the multi-pen plot workflow. Passing `phys`
@@ -291,9 +301,11 @@ cap, make the one solve leaner, and guard it*, not tiling:
 | canvas_aspect | `W:H` / ratio | blank = source | Mural canvas target aspect (`engine/compose.py`). |
 | canvas_fit | contain/cover | contain | Letterbox vs center-crop. |
 | margin_fill | light/mean/dark/edge | light | Tone filling the letterbox margins. |
-| color_mode | off/tone/depth | off | Pen-layer separation; off = single black ink. |
-| n_colors | 1-6 | 2 | Number of pen layers when color is on. |
-| palette | CSS colors | default ramp | Per-layer colors (index = layer). |
+| color_mode | off/tone/depth/cmyk/lum | off | Pen-layer separation; off = single black ink. `cmyk`/`lum` = true channel separation (`separate_channels`, own rotated field per pen). |
+| n_colors | 1-6 | 2 | Number of pen layers (tone/depth/lum). `cmyk` is fixed at 4. |
+| palette | CSS colors | default ramp | Per-layer colors (index = layer); `cmyk` defaults to `CMYK_PALETTE`. |
+| sep_angles | CSS-style number list | screen angles | cmyk/lum only — per-layer field rotation (degrees) for moiré-avoidance. |
+| sep_threshold | 0-1 | 0.12 | cmyk only — a channel's lines are drawn only where the channel intensity is at least this. |
 | phys_width/phys_height | > 0 | none | Physical export size; stamps real units on the SVG. |
 | phys_units | in/cm/mm | in | Units for the physical size. |
 | pen_mm | > 0 | none | Plotter pen width in mm — draws a constant physical stroke (overrides `wt_range`); needs `phys` to resolve to viewBox units. Absent ⇒ pixel-derived stroke (byte-stable default). |

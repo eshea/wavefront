@@ -25,7 +25,8 @@ from engine.export import (contours_to_svg_string_fast, contours_to_svg_layered,
 from engine.flow import trace_flow_lines
 from engine.march import build_march_field
 from engine.compose import compose_canvas, parse_aspect, MARGIN_FILLS
-from engine.color import assign_layers, default_palette
+from engine.color import (assign_layers, default_palette, separate_channels,
+                          cmyk_palette)
 from engine.crosshatch import crosshatch_pass
 
 METHODS = ('contour', 'wave', 'flow', 'march')  # contour = classic isolines (default)
@@ -204,6 +205,22 @@ def _parse_palette(raw, n_colors):
     return colors[:n_colors]
 
 
+def _parse_angles(raw):
+    """Comma/space-separated per-layer screen angles (degrees) -> list, or None to
+    use the default SCREEN_ANGLES."""
+    if not raw:
+        return None
+    vals = []
+    for tok in raw.replace(' ', ',').split(','):
+        tok = tok.strip()
+        if tok:
+            try:
+                vals.append(float(tok))
+            except ValueError as exc:
+                raise RequestValidationError('sep_angles must be numbers') from exc
+    return vals or None
+
+
 def _required_image_file():
     if 'image' not in request.files:
         raise RequestValidationError('No image provided')
@@ -287,10 +304,20 @@ def process():
         except ValueError as exc:
             raise RequestValidationError('canvas_aspect must look like "2:1"') from exc
         color_mode = (request.form.get('color_mode') or 'off').strip().lower()
-        if color_mode not in ('off', 'tone', 'depth'):
+        if color_mode not in ('off', 'tone', 'depth', 'cmyk', 'lum'):
             color_mode = 'off'
         n_colors = _parse_int_param('n_colors', 2, 1, 6)
-        palette = _parse_palette(request.form.get('palette'), n_colors)
+        if color_mode == 'cmyk':
+            n_colors = 4   # fixed C/M/Y/K channel set
+        raw_palette = request.form.get('palette')
+        if color_mode == 'cmyk' and not raw_palette:
+            palette = cmyk_palette()
+        else:
+            palette = _parse_palette(raw_palette, n_colors)
+        # Channel-separation tuning (cmyk/lum): per-layer screen angles + the
+        # channel-presence cutoff. Absent ⇒ default SCREEN_ANGLES / 0.12.
+        sep_angles = _parse_angles(request.form.get('sep_angles'))
+        sep_threshold = _parse_float_param('sep_threshold', 0.12, 0.0, 1.0)
         phys_w = _parse_optional_float_param('phys_width', min_value=0.0)
         phys_h = _parse_optional_float_param('phys_height', min_value=0.0)
         phys_units = (request.form.get('phys_units') or 'in').strip().lower()
@@ -354,7 +381,16 @@ def process():
         #   march   — 4-connected weighted-distance (marching waves), marching squares
         #   flow    — gradient streamlines with a directional carrier, traced directly
         with _apply_knobs(method):
-            if method == 'flow':
+            if color_mode in ('cmyk', 'lum'):
+                # Multi-pen channel separation REPLACES the single-field build: each
+                # channel/tier gets its own rotated diamond field + pen layer.
+                contours = separate_channels(
+                    luminance, rgb_array, sx, sy, levels, lum_mix,
+                    mode=color_mode, n_colors=n_colors,
+                    angles=sep_angles, threshold=sep_threshold)
+                stats = {'paths': len(contours), 'levels': levels, 't_min': 0.0,
+                         't_max': 0.0, 'grid': f'{img_w}x{img_h}'}
+            elif method == 'flow':
                 contours, stats = trace_flow_lines(luminance, sx, sy, levels, lum_mix)
             else:
                 if method == 'wave':
@@ -388,8 +424,9 @@ def process():
 
         # Color layers (mural color mode): tag each contour with a pen index on the
         # PROCESSING grid (so the tone reference and points share coordinates),
-        # before scaling to export space. 'layer' survives scale_contours.
-        if color_mode != 'off':
+        # before scaling to export space. 'layer' survives scale_contours. cmyk/lum
+        # already carry per-channel layers from separate_channels.
+        if color_mode in ('tone', 'depth'):
             gray_ref = ((luminance / 255.0).astype('float32')
                         if color_mode == 'tone' else None)
             assign_layers(contours, n_colors, mode=color_mode, gray=gray_ref)
