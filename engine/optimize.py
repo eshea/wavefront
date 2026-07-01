@@ -115,17 +115,22 @@ def _merge_layer(paths, gap):
         if used[i]:
             continue
         used[i] = True
-        chain = opens[i]['points'].copy()
+        parts = [opens[i]['points']]          # collect, vstack once (avoid O(k^2))
+        tail = parts[0][-1]
         while True:
-            nb = nearest(chain[-1], i)
+            nb = nearest(tail, i)
             if nb is None:
                 break
             j, end = nb
             used[j] = True
             seg = opens[j]['points']
-            chain = np.vstack([chain, seg[::-1] if end == -1 else seg])
+            seg = seg[::-1] if end == -1 else seg
+            # Drop the near-coincident join point so the seam is a single clean
+            # segment, not a zero-length pen dwell.
+            parts.append(seg[1:] if len(seg) > 1 else seg)
+            tail = seg[-1]
         out = dict(opens[i])           # inherit normalized_t / layer / threshold
-        out['points'] = chain
+        out['points'] = np.vstack(parts) if len(parts) > 1 else parts[0]
         merged.append(out)
     return merged + closed
 
@@ -139,27 +144,33 @@ def merge_chains(contours, gap):
 
 def _reorder_layer(paths):
     """Greedy nearest-neighbour visiting order over path endpoints, reversing a
-    path when entering from its far end is closer. Starts at the first path."""
+    path when entering from its far end is closer. Starts at the first path.
+    Endpoints are pre-extracted to native-float tuples once, so the O(n^2) sweep
+    does plain-float arithmetic rather than per-candidate numpy-scalar math."""
     if len(paths) < 3:
         return list(paths)
+    # (start_row, start_col, end_row, end_col) per path, as native floats.
+    ends = [(float(p['points'][0][0]), float(p['points'][0][1]),
+             float(p['points'][-1][0]), float(p['points'][-1][1])) for p in paths]
     remaining = list(range(len(paths)))
     cur = remaining.pop(0)
     ordered = [paths[cur]]
-    tail = paths[cur]['points'][-1]
+    tr, tc = ends[cur][2], ends[cur][3]          # tail = current path's exit
     while remaining:
         best, bestd = None, None
         for k in remaining:
-            p = paths[k]['points']
-            for rev in (False, True):
-                entry = p[-1] if rev else p[0]
-                dd = (tail[0] - entry[0]) ** 2 + (tail[1] - entry[1]) ** 2
-                if bestd is None or dd < bestd or (dd == bestd and (k, rev) < best):
-                    bestd, best = dd, (k, rev)
+            sr, sc, er, ec = ends[k]
+            d0 = (tr - sr) ** 2 + (tc - sc) ** 2   # enter at start (rev=False)
+            d1 = (tr - er) ** 2 + (tc - ec) ** 2   # enter at end   (rev=True)
+            if bestd is None or d0 < bestd or (d0 == bestd and (k, False) < best):
+                bestd, best = d0, (k, False)
+            if d1 < bestd or (d1 == bestd and (k, True) < best):
+                bestd, best = d1, (k, True)
         k, rev = best
         remaining.remove(k)
-        c = _reversed(paths[k]) if rev else paths[k]
-        ordered.append(c)
-        tail = c['points'][-1]
+        ordered.append(_reversed(paths[k]) if rev else paths[k])
+        sr, sc, er, ec = ends[k]
+        tr, tc = (sr, sc) if rev else (er, ec)     # new tail = post-traversal exit
     return ordered
 
 
@@ -177,35 +188,49 @@ def _two_opt_layer(order, passes):
     """First-improvement 2-opt on the visiting order: reversing positions i..j
     flips each path's direction, changing only the two boundary pen-up edges
     (internal edges are symmetric, so their cost is unchanged). Capped at
-    `passes` sweeps; guarded so it can never increase total travel."""
+    `passes` sweeps.
+
+    Endpoints are held in native-float `ent`/`ext` lists kept in lockstep with
+    `order` (so the O(n^2) sweep does plain-float math, not per-candidate numpy
+    scalars). Since only strictly-improving swaps are applied, the tour can never
+    lengthen — but we still keep the pre-optimization order and return it if the
+    final tour is somehow worse (a real safety net, not the old no-op)."""
     n = len(order)
     if n < 4 or passes <= 0:
         return order
-    start_cost = _tour_cost(order)
+    original = list(order)
     order = list(order)
+    ent = [(float(c['points'][0][0]), float(c['points'][0][1])) for c in order]
+    ext = [(float(c['points'][-1][0]), float(c['points'][-1][1])) for c in order]
+
+    def d(a, b):
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+    def tour():
+        return sum(d(ext[t], ent[t + 1]) for t in range(n - 1))
+
+    start_cost = tour()
     for _ in range(int(passes)):
         improved = False
         for i in range(0, n - 1):
             for j in range(i + 1, n):
-                ei = order[i]['points'][0]          # entry of segment i
-                xj = order[j]['points'][-1]          # exit of segment j
-                # leading edge (i-1 -> i): present only when i > 0
-                old_lead = _dist(order[i - 1]['points'][-1], ei) if i > 0 else 0.0
-                new_lead = _dist(order[i - 1]['points'][-1], xj) if i > 0 else 0.0
-                # trailing edge (j -> j+1): present only when j < n-1
+                old_lead = d(ext[i - 1], ent[i]) if i > 0 else 0.0
+                new_lead = d(ext[i - 1], ext[j]) if i > 0 else 0.0
                 if j < n - 1:
-                    tj = order[j + 1]['points'][0]
-                    old_trail = _dist(order[j]['points'][-1], tj)
-                    new_trail = _dist(order[i]['points'][0], tj)
+                    old_trail = d(ext[j], ent[j + 1])
+                    new_trail = d(ent[i], ent[j + 1])
                 else:
                     old_trail = new_trail = 0.0
                 if (new_lead + new_trail) + 1e-9 < (old_lead + old_trail):
                     order[i:j + 1] = [_reversed(c) for c in reversed(order[i:j + 1])]
+                    # reversing + flipping swaps entry/exit within the block
+                    old_ent, old_ext = ent[i:j + 1], ext[i:j + 1]
+                    ent[i:j + 1] = old_ext[::-1]
+                    ext[i:j + 1] = old_ent[::-1]
                     improved = True
         if not improved:
             break
-    # Safety net: never return a worse tour than we started with.
-    return order if _tour_cost(order) <= start_cost + 1e-6 else order
+    return order if tour() <= start_cost + 1e-6 else original
 
 
 def two_opt(contours, passes):

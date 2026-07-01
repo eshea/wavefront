@@ -544,6 +544,16 @@ class SeparationUnitTests(unittest.TestCase):
         self.assertTrue(layers.issubset({0, 1, 2}))
         self.assertGreaterEqual(len(layers), 2)      # genuinely separated
 
+    def test_compose_rgb_canvas_registers_subject_and_whitens_margins(self):
+        from engine.compose import compose_rgb_canvas
+        rgb = np.zeros((20, 20, 3), dtype=np.float32)
+        rgb[:] = (0, 255, 255)                        # all-cyan subject
+        out = compose_rgb_canvas(rgb, 2.0, fit='contain')   # -> (20, 40, 3)
+        self.assertEqual(out.shape, (20, 40, 3))
+        np.testing.assert_array_equal(out[:, 0], np.full((20, 3), 255.0))   # white margin
+        np.testing.assert_array_equal(                                      # subject cyan
+            out[:, 20], np.tile(np.array([0, 255, 255], np.float32), (20, 1)))
+
 
 class SeparationEndpointTests(unittest.TestCase):
     def setUp(self):
@@ -556,12 +566,30 @@ class SeparationEndpointTests(unittest.TestCase):
             return self.client.post('/process', data=data,
                                     content_type='multipart/form-data')
 
-    def test_cmyk_emits_four_pen_layers(self):
+    def test_cmyk_reported_palette_matches_pens_drawn(self):
         payload = self._post(color_mode='cmyk').get_json()
         self.assertEqual(payload['color_mode'], 'cmyk')
-        self.assertEqual(len(payload['palette']), 4)
-        self.assertIn('inkscape:label="ink-', payload['svg'])
+        n_layers = payload['svg'].count('inkscape:label="ink-')
+        self.assertGreaterEqual(n_layers, 1)
+        self.assertLessEqual(n_layers, 4)
+        # #2: report exactly the pens that drew, not a fixed 4.
+        self.assertEqual(len(payload['palette']), n_layers)
         ElementTree.fromstring(payload['svg'])
+
+    def test_grayscale_cmyk_reports_single_pen(self):
+        data = {'image': (image_bytes(size=(64, 48), color=(120, 120, 120)), 'g.png'),
+                'color_mode': 'cmyk'}
+        payload = self.client.post('/process', data=data,
+                                   content_type='multipart/form-data').get_json()
+        # C=M=Y=0 for gray, so only the K pen draws.
+        self.assertEqual(len(payload['palette']), 1)
+        self.assertEqual(payload['svg'].count('inkscape:label="ink-'), 1)
+
+    def test_crosshatch_under_cmyk_tags_dark_pen(self):
+        payload = self._post(color_mode='cmyk', crosshatch='on',
+                             hatch_levels='30', hatch_threshold='0.6').get_json()
+        ElementTree.fromstring(payload['svg'])            # valid, no crash
+        self.assertIn('inkscape:label="ink-3"', payload['svg'])   # hatch -> K pen
 
     def test_off_default_is_single_ink(self):
         payload = self._post().get_json()
@@ -590,7 +618,12 @@ class OptimizeUnitTests(unittest.TestCase):
         far = _contour([[100, 100], [100, 110]])   # nowhere near
         out = merge_chains([a, b, far], 0.5)
         self.assertEqual(len(out), 2)              # a+b merged, far stays
-        self.assertEqual(max(len(c['points']) for c in out), 4)
+        # a(2 pts) + b's far endpoint = 3 pts, with the coincident join point
+        # dropped so there is no zero-length seam.
+        merged = max(out, key=lambda c: len(c['points']))
+        self.assertEqual(len(merged['points']), 3)
+        seg_lengths = np.linalg.norm(np.diff(merged['points'], axis=0), axis=1)
+        self.assertTrue(np.all(seg_lengths > 0))    # no zero-length pen dwell
 
     def test_merge_never_crosses_layers(self):
         from engine.optimize import merge_chains

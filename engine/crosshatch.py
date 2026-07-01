@@ -17,16 +17,8 @@ returns `[]`, so the default output is unchanged."""
 import numpy as np
 
 from engine.field import build_rotated_field
-from engine.contour import extract_contours
+from engine.contour import extract_contours, clip_contours_to_mask
 from engine.smooth import resample_contours
-
-
-def _hatch_contour(points, src):
-    """A new contour dict from a run of points, inheriting stroke metadata."""
-    return {'points': np.asarray(points, dtype=np.float32),
-            'threshold': src.get('threshold', 1.0),
-            'normalized_t': src.get('normalized_t', 0.5),
-            'hatch': True}
 
 
 def mask_dark(contours, gray, threshold):
@@ -35,25 +27,7 @@ def mask_dark(contours, gray, threshold):
     luminance in 0–1 (dark = low). Runs shorter than 2 points are dropped."""
     if threshold <= 0:
         return []
-    H, W = gray.shape
-    out = []
-    for c in contours:
-        pts = c['points']
-        rr = np.clip(pts[:, 0].astype(np.int32), 0, H - 1)
-        cc = np.clip(pts[:, 1].astype(np.int32), 0, W - 1)
-        keep = gray[rr, cc] < threshold
-        run = []
-        for i, k in enumerate(keep):
-            if k:
-                run.append(pts[i])
-            elif len(run) >= 2:
-                out.append(_hatch_contour(run, c))
-                run = []
-            else:
-                run = []
-        if len(run) >= 2:
-            out.append(_hatch_contour(run, c))
-    return out
+    return clip_contours_to_mask(contours, gray < threshold, hatch=True)
 
 
 def crosshatch_pass(luminance, seed_x, seed_y, levels, lum_mix=1.0,

@@ -24,7 +24,8 @@ from engine.export import (contours_to_svg_string_fast, contours_to_svg_layered,
                            UNITS_TO_MM)
 from engine.flow import trace_flow_lines
 from engine.march import build_march_field
-from engine.compose import compose_canvas, parse_aspect, MARGIN_FILLS
+from engine.compose import (compose_canvas, compose_rgb_canvas, parse_aspect,
+                            MARGIN_FILLS)
 from engine.color import (assign_layers, default_palette, separate_channels,
                           cmyk_palette)
 from engine.crosshatch import crosshatch_pass
@@ -367,6 +368,11 @@ def process():
                 luminance, canvas_aspect, seed=None, fit=canvas_fit,
                 margin_fill=margin_fill)
             original_size = processed_size
+            # Register RGB to the same canvas so CMYK channel separation stays
+            # aligned to the subject (not stretched across the whole frame).
+            if color_mode == 'cmyk':
+                rgb_array = compose_rgb_canvas(rgb_array, canvas_aspect,
+                                               fit=canvas_fit)
 
         orig_w, orig_h = original_size
         img_w, img_h = processed_size
@@ -419,9 +425,19 @@ def process():
             # regions, deepening shadows without smearing. Runs inside _apply_knobs
             # so it shares the tone knobs; returns [] when off => contours untouched.
             if crosshatch and hatch_levels > 0:
-                contours = contours + crosshatch_pass(
+                hatch = crosshatch_pass(
                     luminance, sx, sy, hatch_levels, lum_mix,
                     threshold=hatch_threshold, angle=hatch_angle)
+                # cmyk/lum skip assign_layers, so tag the shadow hatch with the
+                # darkest pen (K / darkest tier). tone/depth let assign_layers band
+                # it by darkness below; off needs no layer.
+                if color_mode == 'cmyk':
+                    for c in hatch:
+                        c['layer'] = 3
+                elif color_mode == 'lum':
+                    for c in hatch:
+                        c['layer'] = n_colors - 1
+                contours = contours + hatch
                 stats['paths'] = len(contours)
         stats['method'] = method
 
@@ -465,6 +481,15 @@ def process():
                 export_contours, orig_w, orig_h, wt_range,
                 stroke_scale=stroke_scale, phys=phys, pen_mm=pen_mm)
 
+        # Report only the pens that actually drew ink: a grayscale CMYK source
+        # yields only the K layer even though the palette lists four, so the UI
+        # shouldn't prompt for pen swaps that never touch the page.
+        if color_mode != 'off':
+            present = sorted({int(c.get('layer', 0)) for c in contours})
+            report_palette = [palette[i % len(palette)] for i in present]
+        else:
+            report_palette = None
+
         return jsonify({
             'svg': svg_string,
             'stats': stats,
@@ -476,7 +501,7 @@ def process():
             'seed_y': sy,
             'subject_rect': subject_rect,
             'color_mode': color_mode,
-            'palette': palette if color_mode != 'off' else None
+            'palette': report_palette
         })
 
     except RequestValidationError as e:
