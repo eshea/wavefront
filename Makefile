@@ -1,4 +1,4 @@
-ARCHETYPE ?= A
+ARCHETYPE ?= python-web
 APP_PORT ?= 8002
 HEALTH_PATH ?= /healthz
 PYTHON ?= python3

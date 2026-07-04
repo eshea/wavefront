@@ -2,8 +2,8 @@ name: Wavefront CI
 
 on:
   push:
-    branches-ignore: []
-  pull_request:
+    branches: [main]            # solo, no-PR workflow — CI only ever runs against main
+  workflow_dispatch:             # plus manual, for an ad-hoc run
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
