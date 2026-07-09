@@ -31,6 +31,11 @@ opt-in).
   pip install -r requirements.txt
   python app.py
 
+Or use the Makefile:
+
+  make start
+  make stop
+
 Open http://localhost:5055 in your browser.
 
 > Default port is 5055 (avoids macOS AirPlay Receiver, which holds port 5000).
