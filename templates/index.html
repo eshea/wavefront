@@ -184,10 +184,90 @@
     }
     .duo { display: flex; gap: 6px; }
     .duo > * { flex: 1; min-width: 0; }
-    .swatches { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+    .palette-editor { margin-top: 7px; }
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
+    }
     .swatch {
-      width: 24px; height: 24px; padding: 0; cursor: pointer;
-      border: 1px solid var(--border-2); background: none;
+      width: 100%;
+      aspect-ratio: 1;
+      padding: 0;
+      cursor: pointer;
+      border: 1px solid var(--border-2);
+      background: none;
+      position: relative;
+    }
+    .swatch::after {
+      content: attr(data-label);
+      position: absolute;
+      inset: auto 0 2px 0;
+      font-size: 7px;
+      line-height: 1;
+      color: rgba(255, 255, 255, 0.82);
+      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+      text-align: center;
+      letter-spacing: 0;
+      pointer-events: none;
+    }
+    .swatch.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent) inset;
+    }
+    .color-well {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .color-well-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .color-well-head .label {
+      font-size: 9px;
+      color: var(--text-mute);
+      letter-spacing: 0.1em;
+    }
+    .color-well-head .idx {
+      font-size: 9px;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+    }
+    .color-harmony {
+      margin-bottom: 8px;
+    }
+    .color-pick {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--border-2);
+      background: transparent;
+      padding: 2px;
+      cursor: pointer;
+    }
+    .color-pick::-webkit-color-swatch-wrapper { padding: 0; }
+    .color-pick::-webkit-color-swatch {
+      border: 0;
+      border-radius: 0;
+    }
+    .color-pick::-moz-color-swatch {
+      border: 0;
+      border-radius: 0;
+    }
+    .color-hex { margin-top: 6px; }
+    .color-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .color-actions .btn {
+      margin-top: 0;
+      width: auto;
+      flex: 1;
     }
     .hidden { display: none !important; }
     .method-desc {
@@ -514,7 +594,30 @@
           <div class="slider-head"><span class="name">COLORS</span><span class="val" id="v-ccount">2</span></div>
           <input type="range" id="c-count" min="2" max="6" step="1" value="2">
         </div>
-        <div class="swatches" id="c-swatches"></div>
+        <div class="palette-editor">
+          <div class="swatches" id="c-swatches"></div>
+          <div class="color-well">
+            <div class="color-well-head">
+              <div class="label">COLOR WHEEL</div>
+              <div class="idx" id="c-active-label">COLOR 1</div>
+            </div>
+            <div class="color-harmony">
+              <select class="select" id="c-harmony">
+                <option value="auto" selected>AUTO</option>
+                <option value="analogous">ANALOGOUS</option>
+                <option value="split">SPLIT-COMPLEMENT</option>
+                <option value="triadic">TRIADIC</option>
+                <option value="mono">MONOCHROME</option>
+              </select>
+            </div>
+            <input type="color" id="c-wheel" class="color-pick" value="#10202b" aria-label="Active color wheel">
+            <input type="text" class="tin color-hex" id="c-hex" spellcheck="false" placeholder="#10202b">
+            <div class="color-actions">
+              <button class="btn sm" id="c-auto" type="button">AUTO PICK</button>
+              <button class="btn sm" id="c-reset" type="button">RESET RAMP</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -659,7 +762,10 @@
         mWallW = $('m-wallw'), mWallH = $('m-wallh'), mUnits = $('m-units'),
         mPen = $('m-pen'), mSimplify = $('m-simplify'), printReadout = $('print-readout');
   const cMode = $('c-mode'), cOpts = $('c-opts'), cCount = $('c-count'),
-        vCcount = $('v-ccount'), cSwatches = $('c-swatches');
+        vCcount = $('v-ccount'), cSwatches = $('c-swatches'),
+        cHarmony = $('c-harmony'), cWheel = $('c-wheel'), cHex = $('c-hex'),
+        cAuto = $('c-auto'), cReset = $('c-reset'),
+        cActiveLabel = $('c-active-label');
 
   const statPaths = $('st-paths'), statPoints = $('st-points'),
         statLevels = $('st-levels'), statSegs = $('st-segs'),
@@ -690,25 +796,221 @@
   bindSlider(cCount, vCcount, 0);
 
   // ---------- Mural + color controls ----------
+  let activeSwatchIndex = 0;
+
+  function normalizeHexColor(value) {
+    const raw = (value || '').trim();
+    if (!raw) return null;
+    const hex = raw.startsWith('#') ? raw.slice(1) : raw;
+    if (!/^[0-9a-fA-F]{3}$/.test(hex) && !/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+    if (hex.length === 3) {
+      return '#' + hex.split('').map(ch => ch + ch).join('').toLowerCase();
+    }
+    return '#' + hex.toLowerCase();
+  }
+  function clamp01(v) {
+    return Math.max(0, Math.min(1, v));
+  }
+  function wrapHue(h) {
+    return ((h % 360) + 360) % 360;
+  }
+  function hexToRgb(hex) {
+    const clean = normalizeHexColor(hex);
+    if (!clean) return null;
+    const n = parseInt(clean.slice(1), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(v => Math.round(Math.max(0, Math.min(255, v)))
+      .toString(16).padStart(2, '0')).join('');
+  }
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    const d = max - min;
+    if (d !== 0) {
+      s = d / (1 - Math.abs(2 * l - 1));
+      switch (max) {
+        case r: h = 60 * (((g - b) / d) % 6); break;
+        case g: h = 60 * (((b - r) / d) + 2); break;
+        default: h = 60 * (((r - g) / d) + 4); break;
+      }
+    }
+    return { h: wrapHue(h), s: clamp01(s), l: clamp01(l) };
+  }
+  function hslToRgb(h, s, l) {
+    h = wrapHue(h);
+    s = clamp01(s);
+    l = clamp01(l);
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r1 = 0, g1 = 0, b1 = 0;
+    if (hp >= 0 && hp < 1) [r1, g1, b1] = [c, x, 0];
+    else if (hp < 2) [r1, g1, b1] = [x, c, 0];
+    else if (hp < 3) [r1, g1, b1] = [0, c, x];
+    else if (hp < 4) [r1, g1, b1] = [0, x, c];
+    else if (hp < 5) [r1, g1, b1] = [x, 0, c];
+    else [r1, g1, b1] = [c, 0, x];
+    const m = l - c / 2;
+    return { r: (r1 + m) * 255, g: (g1 + m) * 255, b: (b1 + m) * 255 };
+  }
+  function hslToHex(h, s, l) {
+    const { r, g, b } = hslToRgb(h, s, l);
+    return rgbToHex(r, g, b);
+  }
+  function generateHarmonyPalette(anchorHex, count, harmony) {
+    const rgb = hexToRgb(anchorHex) || { r: 16, g: 32, b: 43 };
+    const base = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    const n = Math.max(1, count);
+    const colors = [];
+    const mode = harmony === 'auto'
+      ? (n <= 3 ? 'analogous' : (n === 4 ? 'split' : 'triadic'))
+      : harmony;
+
+    const lightSteps = [0.22, 0.34, 0.48, 0.62, 0.76, 0.88];
+    const satSteps = [0.34, 0.56, 0.68, 0.76, 0.58, 0.40];
+    const push = (h, s, l) => colors.push(hslToHex(h, s, l));
+    const roles = [];
+
+    if (mode === 'mono') {
+      for (let i = 0; i < n; i++) {
+        roles.push({ h: base.h, s: satSteps[i] ?? satSteps[satSteps.length - 1], l: lightSteps[i] ?? lightSteps[lightSteps.length - 1] });
+      }
+    } else if (mode === 'analogous') {
+      const spread = 30;
+      const offsets = Array.from({ length: n }, (_, i) => {
+        const t = n === 1 ? 0 : (i / (n - 1)) * 2 - 1;
+        return t * spread;
+      });
+      offsets.forEach((off, i) => {
+        roles.push({ h: wrapHue(base.h + off), s: satSteps[i] ?? 0.5, l: lightSteps[i] ?? 0.6 });
+      });
+    } else if (mode === 'split') {
+      const anchors = [0, 150, -150];
+      for (let i = 0; i < n; i++) {
+        const off = anchors[i % anchors.length] + (i >= 3 ? (i - 2) * 10 : 0);
+        roles.push({
+          h: wrapHue(base.h + off),
+          s: i === 0 ? 0.38 : (satSteps[i] ?? 0.58),
+          l: lightSteps[i] ?? 0.62,
+        });
+      }
+    } else if (mode === 'triadic') {
+      const anchors = [0, 120, 240];
+      for (let i = 0; i < n; i++) {
+        const off = anchors[i % anchors.length] + (i >= 3 ? (i - 2) * 12 : 0);
+        roles.push({
+          h: wrapHue(base.h + off),
+          s: i === 0 ? 0.38 : (satSteps[i] ?? 0.62),
+          l: lightSteps[i] ?? 0.62,
+        });
+      }
+    } else {
+      const complement = wrapHue(base.h + 180);
+      const offsets = n <= 3
+        ? Array.from({ length: n }, (_, i) => (i - (n - 1) / 2) * 24)
+        : [0, -18, 18, 180, 150, 210];
+      for (let i = 0; i < n; i++) {
+        const off = offsets[i] ?? (i < 3 ? (i - 1) * 18 : complement - base.h + (i - 3) * 10);
+        roles.push({
+          h: i === 3 ? complement : wrapHue(base.h + off),
+          s: i === 0 ? 0.32 : (satSteps[i] ?? 0.56),
+          l: lightSteps[i] ?? 0.68,
+        });
+      }
+    }
+
+    roles.forEach(({ h, s, l }) => push(h, s, l));
+    return colors.slice(0, n);
+  }
+
   function currentSwatchColors() {
-    return Array.from(cSwatches.querySelectorAll('input')).map(i => i.value);
+    return Array.from(cSwatches.querySelectorAll('.swatch')).map(i => i.dataset.color);
+  }
+  function setSwatchSelected(index) {
+    activeSwatchIndex = Math.max(0, Math.min(index, cSwatches.children.length - 1));
+    Array.from(cSwatches.children).forEach((el, i) => {
+      el.classList.toggle('selected', i === activeSwatchIndex);
+    });
+    cActiveLabel.textContent = `COLOR ${activeSwatchIndex + 1}`;
+  }
+  function syncColorEditor() {
+    const colors = currentSwatchColors();
+    const color = colors[activeSwatchIndex] || DEFAULT_PALETTE[activeSwatchIndex % DEFAULT_PALETTE.length];
+    cWheel.value = color;
+    cHex.value = color;
+    setSwatchSelected(activeSwatchIndex);
+  }
+  function setSwatchColor(index, color) {
+    const hex = normalizeHexColor(color);
+    if (!hex) return false;
+    const swatch = cSwatches.children[index];
+    if (!swatch) return false;
+    swatch.dataset.color = hex;
+    swatch.style.backgroundColor = hex;
+    swatch.title = `Color ${index + 1}: ${hex}`;
+    if (index === activeSwatchIndex) {
+      cWheel.value = hex;
+      cHex.value = hex;
+    }
+    return true;
   }
   function renderSwatches() {
     const n = parseInt(cCount.value, 10);
     const prev = currentSwatchColors();
     cSwatches.innerHTML = '';
     for (let i = 0; i < n; i++) {
-      const inp = document.createElement('input');
-      inp.type = 'color';
-      inp.className = 'swatch';
-      inp.value = prev[i] || DEFAULT_PALETTE[i % DEFAULT_PALETTE.length];
-      inp.addEventListener('input', scheduleRender);
-      cSwatches.appendChild(inp);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'swatch';
+      const color = prev[i] || DEFAULT_PALETTE[i % DEFAULT_PALETTE.length];
+      btn.dataset.color = color;
+      btn.dataset.label = String(i + 1);
+      btn.title = `Color ${i + 1}: ${color}`;
+      btn.style.backgroundColor = color;
+      btn.addEventListener('click', () => {
+        activeSwatchIndex = i;
+        syncColorEditor();
+      });
+      cSwatches.appendChild(btn);
     }
+    activeSwatchIndex = Math.min(activeSwatchIndex, n - 1);
+    syncColorEditor();
   }
   function syncColorUI() { cOpts.classList.toggle('hidden', cMode.value === 'off'); }
   cMode.addEventListener('change', () => { syncColorUI(); scheduleRender(); });
   cCount.addEventListener('input', () => { renderSwatches(); scheduleRender(); });
+  cWheel.addEventListener('input', () => {
+    if (setSwatchColor(activeSwatchIndex, cWheel.value)) {
+      cHex.value = normalizeHexColor(cWheel.value);
+      scheduleRender();
+    }
+  });
+  cHex.addEventListener('change', () => {
+    const hex = normalizeHexColor(cHex.value);
+    if (!hex) {
+      syncColorEditor();
+      return;
+    }
+    if (setSwatchColor(activeSwatchIndex, hex)) scheduleRender();
+  });
+  cReset.addEventListener('click', () => {
+    Array.from({ length: parseInt(cCount.value, 10) }, (_, i) => DEFAULT_PALETTE[i % DEFAULT_PALETTE.length])
+      .forEach((color, i) => setSwatchColor(i, color));
+    activeSwatchIndex = 0;
+    syncColorEditor();
+    scheduleRender();
+  });
+  cAuto.addEventListener('click', () => {
+    const colors = generateHarmonyPalette(cWheel.value, parseInt(cCount.value, 10), cHarmony.value);
+    colors.forEach((color, i) => setSwatchColor(i, color));
+    activeSwatchIndex = 0;
+    syncColorEditor();
+    scheduleRender();
+  });
   renderSwatches();
   syncColorUI();
 
