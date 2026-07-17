@@ -11,7 +11,9 @@ The canonical render now matches the artist. Input
 (the tone-cost geodesic, `engine/march.py`), levels 111, 780px. The output is a
 clean, photographic, tone-rendered portrait — the face is depicted by line
 density (dense in shadows/features, sparse in highlights) with L1 diamonds in the
-flats. Tracked evidence: `loop/output/current-woman.png`.
+flats. Tracked evidence: `loop/output/current-woman.png` (refreshed 2026-06-30 to
+the native-742px pipeline + current `march_params.json`; superseded the earlier
+640px-grid capture).
 
 Deterministic score (`loop/dscore.py`): **d_score 100, d_tone 0.74** (artist 0.71),
 d_diag 0.50 (artist 0.50). The breakthrough was twofold — (1) the scorer's
@@ -35,7 +37,10 @@ Key qualities to match (now achieved on the woman):
 
 Secondary / holdout: the helmet (`examples/space/`) and samurai
 (`examples/samurai/`) — generalization checks; the march defaults are tuned for
-the high-contrast woman, so smooth subjects score lower (acceptable).
+the high-contrast woman, so smooth subjects score lower (acceptable). The samurai
+render at the same CORE-default settings is now tracked as generalization evidence:
+`loop/output/current-samurai.png` (added 2026-06-30 — the busy, high-contrast scene
+the march defaults handle well; repro in `docs/algorithm.md`).
 
 ---
 

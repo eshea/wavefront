@@ -321,6 +321,34 @@ the source of the web UI's STUDIO slider ranges.
 into horizontal bands. The 4-connected L1 topology is constrained: tone/edges bend
 and bunch the diamonds locally but cannot reroute them into bands.
 
+### Canonical reference renders (the "this is CORE" exhibits)
+
+Two committed renders capture what the active `march` field produces at
+CORE-default settings (centered seed, `levels 111`, `smooth 0.0`, `lum_mix 0.8`,
+constant black ink) — one portrait, one busy scene, both hitting the CONTOUR-V
+replication goal:
+
+- `loop/output/current-woman.png` / `.svg` — the canonical portrait
+  (`examples/woman/woman-source.jpeg`): tone-driven line density, L1 diamonds in
+  the flats, features rendered by hatch density.
+- `loop/output/current-samurai.png` / `.svg` — the generalization scene
+  (`examples/samurai/samurai-source.jpg`): the same defaults on a high-contrast,
+  detailed subject; isolines wrap the shadow structure into nested topography.
+
+Both are force-tracked (see `.gitignore`); the `.stats.json` beside each records
+the exact grid, level, and t-range of the capture. Regenerate either with
+`loop/render.py` (in-process, so it picks up the live `engine/march_params.json`):
+
+```bash
+source .venv/bin/activate
+# woman → current-woman.*
+python loop/render.py 1 --input examples/woman/woman-source.jpeg \
+    --levels 111 --smooth 0.0 --lum-mix 0.8 --out-dir loop/output --png-width 780
+# samurai → current-samurai.* (rename iter_NNN.* to current-samurai.* after)
+python loop/render.py 3 --input examples/samurai/samurai-source.jpg \
+    --levels 111 --smooth 0.0 --lum-mix 0.8 --out-dir loop/output --png-width 780
+```
+
 ## Parked baselines (not the active path)
 
 Two other field methods exist behind `method=`; they share Steps 1, 4–7 and only

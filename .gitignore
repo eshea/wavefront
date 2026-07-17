@@ -54,12 +54,19 @@ loop/EXPERIMENT_DIGEST.md
 loop/.guard_feedback
 
 # ...but force-track a couple of files: iter_014.png is the input for
-# loop/tests/score_smoke.sh, and current-woman.* is the tracked "very good"
-# canonical render (method=march) — documented evidence in EXPERIMENT_LOG.md.
-# The parent dir is matched by a glob (not a dir-ignore) so these negations take effect.
+# loop/tests/score_smoke.sh, and current-woman.*/current-samurai.* are the tracked
+# canonical method=march reference renders at CORE-default settings (levels 111,
+# smooth 0, lum_mix 0.8) — documented evidence in EXPERIMENT_LOG.md, with repro
+# commands in docs/algorithm.md. The .stats.json beside each is its machine-readable
+# settings record. The parent dir is matched by a glob (not a dir-ignore) so these
+# negations take effect.
 !loop/output/iter_014.png
 !loop/output/current-woman.png
 !loop/output/current-woman.svg
+!loop/output/current-woman.stats.json
+!loop/output/current-samurai.png
+!loop/output/current-samurai.svg
+!loop/output/current-samurai.stats.json
 
 # Sweep experiments are throwaway exploration — keep them OUT of git (regenerable
 # locally; the substantive outcome is baked into engine defaults + render_tick).
@@ -70,6 +77,8 @@ loop/optimize_log.jsonl
 loop/WAVE_SWEEP.md
 loop/sweep_best.png
 loop/sweep_best.svg
+# Ad-hoc render dumps from local sweeps/experiments (regenerable; can be large).
+renders/
 
 # Force-track the marching-waves sample renders as durable visual references
 # (the *.png/*.svg rules above would otherwise ignore them). Regenerable via
@@ -86,3 +95,6 @@ loop/sweep_best.svg
 # them). Regenerable via `python loop/tests/make_hard_negatives.py` (human-run).
 !loop/tests/fixtures/hard_neg/*.png
 !loop/tests/fixtures/borderline/*.png
+
+# Claude Code personal settings
+.claude/settings.local.json

@@ -1,0 +1,11 @@
+{
+  "grid": "449x800",
+  "levels": 111,
+  "method": "march",
+  "paths": 735,
+  "segments": 44805,
+  "source": "examples/samurai/samurai-source.jpg",
+  "t_max": 1653.8,
+  "t_min": 2.2,
+  "total_points": 45540
+}

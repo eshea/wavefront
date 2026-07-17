@@ -1,0 +1,11 @@
+{
+  "grid": "742x742",
+  "levels": 111,
+  "method": "march",
+  "paths": 996,
+  "segments": 64682,
+  "source": "examples/woman/woman-source.jpeg",
+  "t_max": 1348.6,
+  "t_min": 1.0,
+  "total_points": 65678
+}
