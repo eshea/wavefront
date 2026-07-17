@@ -141,6 +141,26 @@ end, not the canonical path.
   out, real corners stay, point count drops ~70%. Endpoints are preserved
   exactly (closed paths stay closed; tiny closed loops keep ≥4 samples).
 
+## Step 4c: Crosshatch second-direction depth (opt-in — `engine/crosshatch.py`)
+
+A single diamond direction can only get so dark before its lines pile into a muddy
+blob — the artist's own stated failure mode for deep shadows. Opt-in crosshatching
+adds a SECOND set of lines that cross the first, **in the dark regions only**, so
+shadows deepen toward solid ink while the lines stay legible:
+
+  1. `build_rotated_field` builds a diamond field with its L1 axes rotated by
+     `hatch_angle` (default 45°) about the seed, so its isolines run across the
+     primary ones.
+  2. `extract_contours` + `resample_contours` at `hatch_levels` produce that second
+     line set, run inside `_apply_knobs` so it shares the tone knobs.
+  3. `mask_dark` clips each line to the runs of points where `luminance/255 <
+     hatch_threshold`, splitting a path wherever it leaves the dark region.
+
+The survivors (tagged `hatch=True`) extend the primary contour list and flow
+through the identical smooth → optimize → color → scale → export path. Off
+(`crosshatch` absent, or `hatch_levels`/`hatch_threshold` at 0) ⇒ no extra lines,
+output unchanged.
+
 ## Step 5: Chaikin Smoothing
 
   Chaikin's corner-cutting algorithm is applied iteratively:
@@ -215,6 +235,16 @@ writer in `engine/export.py`; the field/contour/smooth core is untouched.
   radiating from the seed — the hypsometric/elevation look). `n_colors` (1–6) and an
   optional `palette` drive the export. Assignment runs on the processing grid before
   scaling, so the `layer` index survives the scale-to-export step.
+- **Channel separation (`engine/color.py:separate_channels`, `color_mode=cmyk`/`lum`).**
+  Goes beyond banding one field: each channel/tier gets its OWN diamond field via
+  `build_rotated_field`, rotated to a distinct **screen angle** (`SCREEN_ANGLES`, the
+  halftone-craft reason print screens are angled — avoids the four line sets beating
+  into a moiré), then clipped to where that channel is present. `cmyk` splits RGB
+  into Cyan/Magenta/Yellow/Key pens (`rgb_to_cmyk`, density following each channel's
+  intensity, clipped at `sep_threshold`; default `CMYK_PALETTE`). `lum` splits into
+  `n_colors` rotated luminance tiers (darkest → lightest), each clipped to its tonal
+  band. `sep_angles` overrides the per-layer angles. These REPLACE the single-field
+  build; `off`/`tone`/`depth` are untouched, so the default stays byte-identical.
 - **Layered SVG + physical size (`engine/export.py`).**
   `contours_to_svg_layered` emits one Inkscape pen layer (`<g inkscape:groupmode=
   "layer">`) per color — the multi-pen plot workflow. Passing `phys`
@@ -233,6 +263,17 @@ writer in `engine/export.py`; the field/contour/smooth core is untouched.
   interior points within `simplify_mm` (converted from print size to grid px) of
   their chord — shape-preserving, exact endpoints, iterative so a huge path can't
   blow the recursion limit. Absent ⇒ no decimation (byte-stable default).
+- **Plotter path optimization (`engine/optimize.py`).** A plotter draws each path
+  pen-down and travels pen-up between paths; marching-squares emits paths in scan
+  order, so consecutive paths can be far apart. After layer assignment (so it never
+  crosses pens) an opt-in pass cuts that waste — CONTOUR-V STUDIO's "CHAIN GAP /
+  TSP-ORDER / 2-OPT" tools: `opt_merge_gap` joins open paths whose endpoints are
+  within a gap (fewer pen lifts), `opt_reorder` greedily visits nearest endpoints
+  (shorter pen-up travel, reversing paths as needed), `opt_two_opt` runs bounded
+  2-opt polish on that order (guarded so it can never increase travel), and
+  `opt_min_seg` drops stub paths below an arclength. Geometry drawn is unchanged;
+  all default off ⇒ the export is byte-identical. (Simplification is the separate
+  `simplify_mm` / `decimate_contours` pass above.)
 
 ## Large prints: compute ceiling and guards
 
@@ -271,13 +312,23 @@ cap, make the one solve leaner, and guard it*, not tiling:
 | canvas_aspect | `W:H` / ratio | blank = source | Mural canvas target aspect (`engine/compose.py`). |
 | canvas_fit | contain/cover | contain | Letterbox vs center-crop. |
 | margin_fill | light/mean/dark/edge | light | Tone filling the letterbox margins. |
-| color_mode | off/tone/depth | off | Pen-layer separation; off = single black ink. |
-| n_colors | 1-6 | 2 | Number of pen layers when color is on. |
-| palette | CSS colors | default ramp | Per-layer colors (index = layer). |
+| color_mode | off/tone/depth/cmyk/lum | off | Pen-layer separation; off = single black ink. `cmyk`/`lum` = true channel separation (`separate_channels`, own rotated field per pen). |
+| n_colors | 1-6 | 2 | Number of pen layers (tone/depth/lum). `cmyk` is fixed at 4. |
+| palette | CSS colors | default ramp | Per-layer colors (index = layer); `cmyk` defaults to `CMYK_PALETTE`. |
+| sep_angles | CSS-style number list | screen angles | cmyk/lum only — per-layer field rotation (degrees) for moiré-avoidance. |
+| sep_threshold | 0-1 | 0.12 | cmyk only — a channel's lines are drawn only where the channel intensity is at least this. |
 | phys_width/phys_height | > 0 | none | Physical export size; stamps real units on the SVG. |
 | phys_units | in/cm/mm | in | Units for the physical size. |
 | pen_mm | > 0 | none | Plotter pen width in mm — draws a constant physical stroke (overrides `wt_range`); needs `phys` to resolve to viewBox units. Absent ⇒ pixel-derived stroke (byte-stable default). |
 | simplify_mm | > 0 | none | RDP point-budget tolerance in mm — drops redundant points so big-print SVGs stay light for editors/plotters; needs `phys` (converted to grid px). Absent ⇒ no decimation. |
+| crosshatch | on/off | off | Add a rotated second-direction line set clipped to dark regions (`engine/crosshatch.py`), deepening shadows. Needs `hatch_levels` > 0. |
+| hatch_levels | 0-150 | 0 | Number of contour levels in the crosshatch pass. 0 ⇒ no crosshatch. |
+| hatch_threshold | 0-1 | 0 | Darkness cutoff (luminance/255): crosshatch lines are kept only where the image is darker than this. 0 ⇒ no crosshatch. |
+| hatch_angle | 0-90 | 45 | Rotation of the crosshatch diamond axes vs the primary field. |
+| opt_merge_gap | 0-10 | 0 | Plotter optimization (`engine/optimize.py`): join open paths whose endpoints are within this gap (grid px) to cut pen lifts; layer-aware. 0 ⇒ off. |
+| opt_reorder | on/off | off | Greedy nearest-neighbour path ordering to shorten pen-up travel (layer-aware, reverses paths as needed). |
+| opt_two_opt | 0-10 | 0 | Bounded 2-opt sweeps polishing the visiting order (guarded never to increase travel). 0 ⇒ off. |
+| opt_min_seg | 0-50 | 0 | Drop paths whose arclength (grid px) is below this. 0 ⇒ keep all. |
 
 ## The active field: method=march (fast marching, reciprocal cost)
 
@@ -361,7 +412,12 @@ swap Step 3. They are not actively tuned — left for comparison/experiment.
   uniform warp tends to over-densify the face into a smudge — which is why the
   wave field (bounded, seed-faded relief) became the active method.
 - **`method=flow` (`engine/flow.py`)** — evenly-spaced gradient streamlines
-  (Jobard & Lefebvre); a fundamentally different, hair-like aesthetic.
+  (Jobard & Lefebvre); a fundamentally different, hair-like aesthetic. An opt-in
+  **Edge-Tangent-Flow** coherence pass (Kang, Lee & Chui 2007 — `etf_smooth`,
+  gated by `flow_etf`) realigns each tangent toward spatially-near neighbours that
+  carry stronger edges and already point a similar way, turning the raw streamlines
+  from "hair-like" into clean, coherent lines. `flow_etf=0` (default) skips it, so
+  the parked output is unchanged; `flow_etf_radius`/`flow_etf_iters` size the kernel.
 
 Malformed numeric values return HTTP 400. Out-of-range numeric values are
 clamped to the ranges above.

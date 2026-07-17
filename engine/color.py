@@ -18,16 +18,102 @@ processing-grid gray, so indices line up with the field.
 
 import numpy as np
 
+from engine.field import build_rotated_distance, shape_tone_term
+from engine.contour import extract_contours, clip_contours_to_mask
+from engine.smooth import resample_contours
+
 
 # Ordered dark -> light default ramp (ocean -> sand -> rust); layer 0 is darkest
 # so 'tone' mode puts shadows in the deepest color. Overridable per request.
 DEFAULT_PALETTE = ['#10202b', '#2a6f8f', '#5fb0a6', '#e3b23c', '#d9692b', '#a8324a']
+
+# Process-color separation. Each channel is drawn as its own pen layer with the
+# field rotated to a classic halftone screen angle so the four line sets cross at
+# distinct angles instead of beating into a moiré (the print-craft reason screens
+# are angled). Order matches rgb_to_cmyk: C, M, Y, K.
+CMYK_PALETTE = ['#00aeef', '#ec008c', '#fff200', '#000000']
+SCREEN_ANGLES = [15.0, 75.0, 0.0, 45.0]
 
 
 def default_palette(n_colors):
     """First n_colors of the default ramp (clamped to 1..len)."""
     n = max(1, min(len(DEFAULT_PALETTE), int(n_colors)))
     return DEFAULT_PALETTE[:n]
+
+
+def cmyk_palette():
+    """The four process-color pen colors (cyan, magenta, yellow, black)."""
+    return list(CMYK_PALETTE)
+
+
+def rgb_to_cmyk(rgb_array):
+    """Split an (H,W,3) 0–255 RGB image into [C, M, Y, K] float maps in 0–1."""
+    rgb = rgb_array.astype(np.float32) / 255.0
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    k = 1.0 - np.maximum(np.maximum(r, g), b)
+    denom = np.where(k < 1.0, 1.0 - k, 1.0)
+    c = np.clip((1.0 - r - k) / denom, 0.0, 1.0)
+    m = np.clip((1.0 - g - k) / denom, 0.0, 1.0)
+    y = np.clip((1.0 - b - k) / denom, 0.0, 1.0)
+    return [c, m, y, np.clip(k, 0.0, 1.0)]
+
+
+def _resize_to(arr, shape):
+    """Nearest-neighbour resample of a 2-D map to `shape` (crash-proof when the
+    source RGB grid differs from a padded canvas luminance grid)."""
+    if arr.shape == shape:
+        return arr
+    H, W = shape
+    ys = np.linspace(0, arr.shape[0] - 1, H).astype(np.intp)
+    xs = np.linspace(0, arr.shape[1] - 1, W).astype(np.intp)
+    return arr[np.ix_(ys, xs)]
+
+
+def separate_channels(luminance, rgb_array, seed_x, seed_y, levels, lum_mix=1.0,
+                      *, mode='cmyk', n_colors=4, angles=None, threshold=0.12):
+    """Multi-pen channel separation: render each channel as its own rotated diamond
+    field, clipped to where that channel is present, tagged with its pen `layer`.
+
+      - mode='cmyk': four C/M/Y/K channels from `rgb_array`; line density follows
+        each channel's intensity, clipped to where the channel is >= `threshold`.
+        `rgb_array` must already be registered to the `luminance` grid (the caller
+        recomposes it for wide canvases); a residual shape mismatch is resampled.
+      - mode='lum': `n_colors` luminance tiers from darkest to lightest; the diamond
+        field follows the real luminance, each tier clipped to its tonal band — every
+        tier shares ONE luminance term (computed once; only rotation/mask vary).
+
+    Each layer's field is rotated to a distinct screen angle (`angles`, default
+    `SCREEN_ANGLES`) to avoid moiré. Returns one flat contour list (layers mixed),
+    each contour carrying a `layer` index for `contours_to_svg_layered`.
+
+    Each spec is `(lum_term, mask)`: `lum_term` is the rotation-independent
+    luminance field term (`shape_tone_term`), `mask` selects where that pen draws."""
+    angles = angles or SCREEN_ANGLES
+    shape = luminance.shape
+    if mode == 'cmyk':
+        chans = [_resize_to(ch, shape) for ch in rgb_to_cmyk(rgb_array)]
+        # Each channel drives its OWN luminance term (density follows the channel).
+        specs = [(shape_tone_term((1.0 - ch) * 255.0, lum_mix), ch >= threshold)
+                 for ch in chans]
+    else:  # 'lum' tonal tiers — every tier shares the SAME luminance term.
+        n = max(1, int(n_colors))
+        lum_term = shape_tone_term(luminance, lum_mix)
+        dark = 1.0 - np.clip(luminance / 255.0, 0.0, 1.0)
+        edges = np.linspace(0.0, 1.0, n + 1)
+        specs = []
+        for t in range(n):
+            hi_ok = (dark <= edges[t + 1]) if t == n - 1 else (dark < edges[t + 1])
+            specs.append((lum_term, (dark >= edges[t]) & hi_ok))
+
+    out = []
+    for idx, (lum_term, mask) in enumerate(specs):
+        angle = float(angles[idx % len(angles)])
+        field = build_rotated_distance(shape, seed_x, seed_y, angle) + lum_term
+        contours, _ = extract_contours(field, levels,
+                                       float(field.min()), float(field.max()))
+        contours = resample_contours(contours)
+        out.extend(clip_contours_to_mask(contours, mask, layer=idx))
+    return out
 
 
 def _sample_gray(points, gray):

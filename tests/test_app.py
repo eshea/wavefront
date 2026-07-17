@@ -443,5 +443,311 @@ class PenStrokeTests(unittest.TestCase):
             self.assertAlmostEqual(back_mm, 0.5, places=3)
 
 
+class CrosshatchUnitTests(unittest.TestCase):
+    def test_pass_off_returns_empty(self):
+        from engine.crosshatch import crosshatch_pass
+        lum = np.full((40, 40), 120.0, dtype=np.float32)
+        self.assertEqual(crosshatch_pass(lum, 20, 20, 0, threshold=0.5), [])
+        self.assertEqual(crosshatch_pass(lum, 20, 20, 30, threshold=0.0), [])
+
+    def test_rotated_field_matches_build_field_at_zero_angle(self):
+        from engine.field import build_field, build_rotated_field
+        lum = (np.mgrid[0:30, 0:30][1] * 8.0).astype(np.float32)
+        a = build_field(lum, 12, 12, 0.8)
+        b = build_rotated_field(lum, 12, 12, 0.8, 0.0)
+        np.testing.assert_array_equal(a[0], b[0])
+        self.assertEqual(a[1], b[1])
+        self.assertEqual(a[2], b[2])
+
+    def test_mask_dark_clips_to_dark_runs(self):
+        from engine.crosshatch import mask_dark
+        gray = np.ones((10, 20), dtype=np.float32)
+        gray[:, :10] = 0.0                                  # left half dark
+        crossing = _contour([[5, c] for c in range(20)])    # spans both halves
+        inside = _contour([[5, c] for c in range(8)])       # fully in the dark half
+        out = mask_dark([crossing, inside], gray, 0.5)
+        self.assertTrue(out)
+        for c in out:
+            self.assertTrue(np.all(c['points'][:, 1] < 10))  # only dark-half points
+            self.assertTrue(c.get('hatch'))
+
+    def test_hatch_lands_only_in_dark_region(self):
+        from engine.crosshatch import crosshatch_pass
+        lum = np.full((60, 60), 255.0, dtype=np.float32)
+        lum[:, :30] = 0.0                                   # left half dark
+        hatch = crosshatch_pass(lum, 30, 30, 50, threshold=0.5, angle=45.0)
+        self.assertTrue(hatch)
+        for c in hatch:
+            self.assertLess(c['points'][:, 1].max(), 31.0)
+
+
+class CrosshatchEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def _post(self, **fields):
+        with EXAMPLE.open('rb') as f:
+            data = {'image': (f, EXAMPLE.name)}
+            data.update(fields)
+            return self.client.post('/process', data=data,
+                                    content_type='multipart/form-data')
+
+    def test_off_is_byte_identical_to_baseline(self):
+        base = self._post().get_json()['svg']
+        off = self._post(crosshatch='off', hatch_levels='0',
+                         hatch_threshold='0').get_json()['svg']
+        self.assertEqual(base, off)
+
+    def test_crosshatch_adds_paths(self):
+        base = self._post().get_json()['stats']['paths']
+        hatched = self._post(crosshatch='on', hatch_levels='40',
+                             hatch_threshold='0.7').get_json()
+        self.assertGreater(hatched['stats']['paths'], base)
+        ElementTree.fromstring(hatched['svg'])
+
+
+class SeparationUnitTests(unittest.TestCase):
+    def test_rgb_to_cmyk_pure_colors(self):
+        from engine.color import rgb_to_cmyk
+        img = np.array([[[0, 255, 255], [0, 0, 0], [255, 255, 255]]],
+                       dtype=np.float32)            # cyan, black, white
+        c, m, y, k = rgb_to_cmyk(img)
+        self.assertAlmostEqual(float(c[0, 0]), 1.0, places=3)   # cyan -> C
+        self.assertAlmostEqual(float(m[0, 0]), 0.0, places=3)
+        self.assertAlmostEqual(float(k[0, 1]), 1.0, places=3)   # black -> K
+        self.assertAlmostEqual(float(k[0, 2]), 0.0, places=3)   # white -> no K
+
+    def test_rotated_field_actually_rotates(self):
+        from engine.field import build_rotated_field
+        lum = (np.mgrid[0:40, 0:40][1] * 6.0).astype(np.float32)
+        f0 = build_rotated_field(lum, 20, 20, 0.8, 0.0)[0]
+        f45 = build_rotated_field(lum, 20, 20, 0.8, 45.0)[0]
+        self.assertFalse(np.array_equal(f0, f45))    # rotation changed the field
+
+    def test_cmyk_separation_emits_per_channel_layers(self):
+        from engine.color import separate_channels
+        rgb = np.zeros((60, 60, 3), dtype=np.float32)
+        rgb[:, :30] = (0, 255, 255)                  # cyan left half
+        rgb[:, 30:] = (0, 0, 0)                       # black right half
+        lum = rgb.mean(axis=2).astype(np.float32)
+        out = separate_channels(lum, rgb, 30, 30, 60, 0.8,
+                                mode='cmyk', threshold=0.2)
+        layers = {c['layer'] for c in out}
+        self.assertIn(0, layers)                     # cyan channel
+        self.assertIn(3, layers)                     # black channel
+
+    def test_lum_separation_bands_into_tiers(self):
+        from engine.color import separate_channels
+        lum = np.tile(np.linspace(0, 255, 90, dtype=np.float32), (90, 1))  # gradient
+        out = separate_channels(lum, None, 45, 45, 80, 0.8, mode='lum', n_colors=3)
+        layers = {c['layer'] for c in out}
+        self.assertTrue(layers.issubset({0, 1, 2}))
+        self.assertGreaterEqual(len(layers), 2)      # genuinely separated
+
+    def test_compose_rgb_canvas_registers_subject_and_whitens_margins(self):
+        from engine.compose import compose_rgb_canvas
+        rgb = np.zeros((20, 20, 3), dtype=np.float32)
+        rgb[:] = (0, 255, 255)                        # all-cyan subject
+        out = compose_rgb_canvas(rgb, 2.0, fit='contain')   # -> (20, 40, 3)
+        self.assertEqual(out.shape, (20, 40, 3))
+        np.testing.assert_array_equal(out[:, 0], np.full((20, 3), 255.0))   # white margin
+        np.testing.assert_array_equal(                                      # subject cyan
+            out[:, 20], np.tile(np.array([0, 255, 255], np.float32), (20, 1)))
+
+
+class SeparationEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def _post(self, **fields):
+        with EXAMPLE.open('rb') as f:
+            data = {'image': (f, EXAMPLE.name)}
+            data.update(fields)
+            return self.client.post('/process', data=data,
+                                    content_type='multipart/form-data')
+
+    def test_cmyk_reported_palette_matches_pens_drawn(self):
+        payload = self._post(color_mode='cmyk').get_json()
+        self.assertEqual(payload['color_mode'], 'cmyk')
+        n_layers = payload['svg'].count('inkscape:label="ink-')
+        self.assertGreaterEqual(n_layers, 1)
+        self.assertLessEqual(n_layers, 4)
+        # #2: report exactly the pens that drew, not a fixed 4.
+        self.assertEqual(len(payload['palette']), n_layers)
+        ElementTree.fromstring(payload['svg'])
+
+    def test_grayscale_cmyk_reports_single_pen(self):
+        data = {'image': (image_bytes(size=(64, 48), color=(120, 120, 120)), 'g.png'),
+                'color_mode': 'cmyk'}
+        payload = self.client.post('/process', data=data,
+                                   content_type='multipart/form-data').get_json()
+        # C=M=Y=0 for gray, so only the K pen draws.
+        self.assertEqual(len(payload['palette']), 1)
+        self.assertEqual(payload['svg'].count('inkscape:label="ink-'), 1)
+
+    def test_crosshatch_under_cmyk_tags_dark_pen(self):
+        payload = self._post(color_mode='cmyk', crosshatch='on',
+                             hatch_levels='30', hatch_threshold='0.6').get_json()
+        ElementTree.fromstring(payload['svg'])            # valid, no crash
+        self.assertIn('inkscape:label="ink-3"', payload['svg'])   # hatch -> K pen
+
+    def test_off_default_is_single_ink(self):
+        payload = self._post().get_json()
+        self.assertIsNone(payload['palette'])
+        self.assertNotIn('inkscape', payload['svg'])
+
+
+class OptimizeUnitTests(unittest.TestCase):
+    def test_all_default_is_identity(self):
+        from engine.optimize import optimize_contours
+        cs = [_contour([[0, 0], [1, 1], [2, 2]])]
+        self.assertIs(optimize_contours(cs), cs)
+
+    def test_drop_short_removes_stubs(self):
+        from engine.optimize import drop_short
+        long_path = _contour([[0, c] for c in range(20)])      # arclength 19
+        stub = _contour([[0, 0], [0, 1]])                       # arclength 1
+        out = drop_short([long_path, stub], 5.0)
+        self.assertEqual(len(out), 1)
+        self.assertIs(out[0], long_path)
+
+    def test_merge_joins_within_gap_only(self):
+        from engine.optimize import merge_chains
+        a = _contour([[0, 0], [0, 10]])
+        b = _contour([[0, 10], [0, 20]])           # touches a's tail
+        far = _contour([[100, 100], [100, 110]])   # nowhere near
+        out = merge_chains([a, b, far], 0.5)
+        self.assertEqual(len(out), 2)              # a+b merged, far stays
+        # a(2 pts) + b's far endpoint = 3 pts, with the coincident join point
+        # dropped so there is no zero-length seam.
+        merged = max(out, key=lambda c: len(c['points']))
+        self.assertEqual(len(merged['points']), 3)
+        seg_lengths = np.linalg.norm(np.diff(merged['points'], axis=0), axis=1)
+        self.assertTrue(np.all(seg_lengths > 0))    # no zero-length pen dwell
+
+    def test_merge_never_crosses_layers(self):
+        from engine.optimize import merge_chains
+        a = _contour([[0, 0], [0, 10]], layer=0)
+        b = _contour([[0, 10], [0, 20]], layer=1)  # same endpoint, different pen
+        out = merge_chains([a, b], 0.5)
+        self.assertEqual(len(out), 2)              # not joined across layers
+
+    def test_reorder_reduces_pen_up_travel(self):
+        from engine.optimize import reorder_nearest, _tour_cost
+        p0 = _contour([[0, 0], [0, 1]])
+        p1 = _contour([[0, 40], [0, 41]])
+        p2 = _contour([[0, 20], [0, 21]])
+        original = [p0, p1, p2]                     # 0 -> 40 -> 20: long zig-zag
+        out = reorder_nearest(original)
+        self.assertLess(_tour_cost(out), _tour_cost(original))
+
+    def test_two_opt_never_increases_travel(self):
+        from engine.optimize import two_opt, _tour_cost
+        paths = [_contour([[0, x], [0, x + 1]]) for x in (0, 50, 10, 40, 20, 30)]
+        before = _tour_cost(paths)
+        out = two_opt(paths, 4)
+        self.assertLessEqual(_tour_cost(out), before + 1e-6)
+
+
+class OptimizeEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def _post(self, **fields):
+        with EXAMPLE.open('rb') as f:
+            data = {'image': (f, EXAMPLE.name)}
+            data.update(fields)
+            return self.client.post('/process', data=data,
+                                    content_type='multipart/form-data')
+
+    def test_off_params_are_byte_identical_to_baseline(self):
+        base = self._post().get_json()['svg']
+        off = self._post(opt_merge_gap='0', opt_min_seg='0',
+                         opt_two_opt='0', opt_reorder='off').get_json()['svg']
+        self.assertEqual(base, off)
+
+    def test_merge_reduces_path_count_and_stays_valid(self):
+        base = self._post().get_json()
+        merged = self._post(opt_merge_gap='3').get_json()
+        self.assertLessEqual(merged['stats']['paths'], base['stats']['paths'])
+        ElementTree.fromstring(merged['svg'])     # still well-formed SVG
+        self.assertEqual(
+            merged['stats']['segments'],
+            max(merged['stats']['total_points'] - merged['stats']['paths'], 0))
+
+
+def _neighbor_coherence(tx, ty):
+    """Mean |t(x)·t(right-neighbour)| — higher = smoother/more coherent field."""
+    dot = np.abs(tx[:, :-1] * tx[:, 1:] + ty[:, :-1] * ty[:, 1:])
+    return float(dot.mean())
+
+
+class ETFFlowTests(unittest.TestCase):
+    """Edge-Tangent-Flow coherence smoothing of the parked flow tangent field."""
+
+    def setUp(self):
+        ys, xs = np.mgrid[0:48, 0:48].astype(np.float32)
+        ang = 0.6 * np.sin(xs / 3.0) + 0.6 * np.cos(ys / 4.0) + 0.3 * np.sin(xs + ys)
+        self.tx = np.cos(ang).astype(np.float32)
+        self.ty = np.sin(ang).astype(np.float32)
+        self.mag = (0.5 + 0.5 * np.sin(xs / 5.0)).astype(np.float32)
+
+    def test_etf_identity_when_off(self):
+        from engine.flow import etf_smooth
+        ox, oy = etf_smooth(self.tx, self.ty, self.mag, 3.0, 0)
+        self.assertIs(ox, self.tx)
+        self.assertIs(oy, self.ty)
+        ox, oy = etf_smooth(self.tx, self.ty, self.mag, 0.0, 3)
+        self.assertIs(ox, self.tx)
+
+    def test_etf_increases_coherence_and_stays_unit_norm(self):
+        from engine.flow import etf_smooth
+        before = _neighbor_coherence(self.tx, self.ty)
+        ox, oy = etf_smooth(self.tx, self.ty, self.mag, 3.0, 2)
+        after = _neighbor_coherence(ox, oy)
+        self.assertGreater(after, before)
+        self.assertTrue(np.all(np.isfinite(ox)) and np.all(np.isfinite(oy)))
+        self.assertTrue(np.allclose(np.hypot(ox, oy), 1.0, atol=1e-3))
+
+    def test_tangent_field_unchanged_when_flow_etf_zero(self):
+        import engine.flow as eflow
+        lum = (np.mgrid[0:40, 0:40][1] * 6.0).astype(np.float32)
+        base = eflow._tangent_field(lum, 3.0)
+        saved = eflow.FLOW_ETF
+        try:
+            eflow.FLOW_ETF = 0.0
+            again = eflow._tangent_field(lum, 3.0)
+        finally:
+            eflow.FLOW_ETF = saved
+        for a, b in zip(base, again):
+            np.testing.assert_array_equal(a, b)
+
+    def test_trace_flow_lines_with_etf_is_deterministic(self):
+        import engine.flow as eflow
+        lum = (np.mgrid[0:60, 0:60][0] * 4.0).astype(np.float32)
+        saved = (eflow.FLOW_ETF, eflow.FLOW_ETF_ITERS)
+        try:
+            eflow.FLOW_ETF, eflow.FLOW_ETF_ITERS = 0.6, 2.0
+            c1, s1 = eflow.trace_flow_lines(lum, 30, 30, 80, 0.8)
+            c2, s2 = eflow.trace_flow_lines(lum, 30, 30, 80, 0.8)
+        finally:
+            eflow.FLOW_ETF, eflow.FLOW_ETF_ITERS = saved
+        self.assertEqual(s1['paths'], s2['paths'])
+        self.assertEqual(s1['total_points'], s2['total_points'])
+        self.assertGreater(s1['paths'], 0)
+        for c in c1:
+            self.assertEqual(c['points'].shape[1], 2)
+
+
+class ETFConfigEndpointTests(unittest.TestCase):
+    def test_config_exposes_flow_etf_knobs_defaulting_off(self):
+        client = app.test_client()
+        payload = client.get('/config').get_json()
+        flow = {k['field']: k for k in payload['knobs']['flow']}
+        for name in ('flow_etf', 'flow_etf_radius', 'flow_etf_iters'):
+            self.assertIn(name, flow)
+        self.assertEqual(flow['flow_etf']['default'], 0.0)
+
+
 if __name__ == '__main__':
     unittest.main()

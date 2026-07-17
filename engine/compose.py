@@ -130,5 +130,17 @@ def compose_canvas(luminance, aspect, *, seed=None, fit='contain',
     return canvas, (cw, ch), seed_xy, subject_rect
 
 
+def compose_rgb_canvas(rgb, aspect, *, fit='contain'):
+    """Register an (H, W, 3) RGB grid into the SAME target-aspect canvas that
+    `compose_canvas` produces for the luminance (the placement is purely geometric,
+    so every channel lands identically) — used so CMYK channel separation stays
+    aligned to the subject on wide canvases instead of stretching across the whole
+    frame. Margins are filled white (→ no color ink there) regardless of the
+    luminance `margin_fill`. Returns an (CH, CW, 3) float32 array."""
+    chans = [compose_canvas(rgb[..., k].astype(np.float32), aspect,
+                            fit=fit, margin_fill='light')[0] for k in range(3)]
+    return np.stack(chans, axis=-1)
+
+
 def _clampf(v, lo, hi):
     return int(round(max(lo, min(hi, v))))

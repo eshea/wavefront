@@ -130,3 +130,37 @@ def scale_contours(contours, from_size, to_size):
         })
 
     return scaled
+
+
+def clip_contours_to_mask(contours, mask, **tags):
+    """Split each contour into the maximal runs of points where `mask` is True,
+    emitting one new contour dict per run (runs shorter than 2 points are dropped).
+
+    `mask` is a boolean (H, W) grid; points are sampled by their integer [row, col].
+    Each emitted dict inherits `threshold`/`normalized_t` from its source and is
+    annotated with any `**tags` (e.g. layer=i, or hatch=True). Shared by the
+    crosshatch dark-region clip and the color channel-separation clip."""
+    H, W = mask.shape
+    out = []
+    for c in contours:
+        pts = c['points']
+        rr = np.clip(pts[:, 0].astype(np.int32), 0, H - 1)
+        cc = np.clip(pts[:, 1].astype(np.int32), 0, W - 1)
+        keep = mask[rr, cc]
+        run = []
+        for i, k in enumerate(keep):
+            if k:
+                run.append(pts[i])
+            else:
+                if len(run) >= 2:
+                    out.append({'points': np.asarray(run, dtype=np.float32),
+                                'threshold': c.get('threshold', 1.0),
+                                'normalized_t': c.get('normalized_t', 0.5),
+                                **tags})
+                run = []
+        if len(run) >= 2:
+            out.append({'points': np.asarray(run, dtype=np.float32),
+                        'threshold': c.get('threshold', 1.0),
+                        'normalized_t': c.get('normalized_t', 0.5),
+                        **tags})
+    return out
